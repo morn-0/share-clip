@@ -33,7 +33,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 #[tokio::main]
 async fn main() -> Result<()> {
     let matches = App::new("share-clip")
-        .version("1.0")
+        .version("0.1.0")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
