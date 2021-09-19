@@ -3,7 +3,6 @@ use clap::{App, Arg};
 use clipboard::{ClipboardContext, ClipboardProvider};
 use deadpool_redis::{Config, Connection, Pool};
 use futures_util::stream::StreamExt;
-use lazy_static::lazy_static;
 use mimalloc::MiMalloc;
 use rand::rngs::OsRng;
 use rayon::prelude::*;
@@ -12,7 +11,10 @@ use rsa::{PaddingScheme, PublicKey, RsaPrivateKey, RsaPublicKey};
 use std::{
     collections::HashSet,
     error::Error,
-    sync::{self, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 use tokio::{
@@ -23,9 +25,7 @@ use tokio::{
     time,
 };
 
-lazy_static! {
-    static ref EXIT: sync::RwLock<i32> = sync::RwLock::new(0);
-}
+static EXIT: AtomicBool = AtomicBool::new(false);
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -63,8 +63,8 @@ async fn main() -> Result<()> {
         .get_matches();
 
     ctrlc::set_handler(move || {
-        if *(EXIT.read().unwrap()) == 0 {
-            *(EXIT.write().unwrap()) = 1;
+        if !EXIT.load(Ordering::Relaxed) {
+            EXIT.swap(true, Ordering::Relaxed);
         }
     })?;
 
@@ -204,7 +204,7 @@ async fn sub_clip(
     });
 
     loop {
-        if *(EXIT.read().unwrap()) == 1 {
+        if EXIT.load(Ordering::Relaxed) {
             break;
         }
 
@@ -276,4 +276,3 @@ async fn dev_sub_clip(
         }
     }
 }
-

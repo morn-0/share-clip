@@ -17,7 +17,6 @@ clipboard = { version = "0.5" }
 ctrlc = { version = "3", default-features = false }
 deadpool-redis = { version = "0.9", default-features = false, features = [ "rt_tokio_1" ] }
 futures-util = { version = "0.3", default-features = false }
-lazy_static = { version = "1", default-features = false }
 mimalloc = { version = "0.1", default-features = false }
 rand = { version = "0.8", default-features = false }
 rayon = { version = "1", default-features = false }
