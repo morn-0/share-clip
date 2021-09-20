@@ -4,6 +4,7 @@ use clap::{App, Arg};
 use deadpool_redis::{Config, Connection, Pool};
 use futures_util::stream::StreamExt;
 use mimalloc::MiMalloc;
+use notify_rust::{Notification, Timeout};
 use rand::rngs::OsRng;
 use rayon::prelude::*;
 use redis::cmd;
@@ -258,10 +259,10 @@ async fn sub_clip_on_device(
             .await?;
         bincode::deserialize::<RsaPrivateKey>(&bytes)?
     };
-    let subscribe_key = {
+    let (subscribe_key, name) = {
         let key_array = key.split(":").collect::<Vec<&str>>();
         let (code, name) = (*key_array.get(1).unwrap(), *key_array.get(2).unwrap());
-        format!("sub_{}_{}", code, name)
+        (format!("sub_{}_{}", code, name), name)
     };
 
     let mut pubsub = Connection::take(pool.get().await?).into_pubsub();
@@ -304,13 +305,23 @@ async fn sub_clip_on_device(
                 });
 
             let mut write = pre_md5.write().await;
-            let md5 = match marker {
+            let (md5, body) = match marker {
                 0 => {
                     let text = String::from_utf8_lossy(&bytes.lock().unwrap()).to_string();
                     let md5 = format!("{:x}", md5::compute(&text));
+                    let body = {
+                        let mut body = format!(
+                            "{}",
+                            &text[0..(if text.len() > 10 { 10 } else { text.len() })]
+                        );
+                        if text.len() > 10 {
+                            body.push_str("...");
+                        }
+                        body
+                    };
                     clip.set_text(text)?;
 
-                    md5
+                    (md5, body)
                 }
                 1 => {
                     let mut prop_split = prop.unwrap().split(",");
@@ -325,10 +336,18 @@ async fn sub_clip_on_device(
                     };
                     clip.set_image(image)?;
 
-                    format!("{:x}", md5::compute(&vec))
+                    (format!("{:x}", md5::compute(&vec)), "[图片]".to_string())
                 }
                 _ => continue,
             };
+
+            Notification::new()
+                .summary(&format!("来自的 {} 的剪切板共享", name))
+                .body(&body)
+                .icon("notification-new-symbolic")
+                .timeout(Timeout::Milliseconds(1000 * 5))
+                .show()?;
+
             write.clone_from(&md5);
             write.shrink_to_fit();
         }
