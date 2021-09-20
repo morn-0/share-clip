@@ -32,7 +32,7 @@ static GLOBAL: MiMalloc = MiMalloc;
 async fn main() -> Result<()> {
     ctrlc::set_handler(move || {
         if !EXIT.load(Ordering::Relaxed) {
-            EXIT.swap(true, Ordering::Relaxed);
+            EXIT.store(true, Ordering::Relaxed);
         }
     })?;
 
