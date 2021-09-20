@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
     })?;
 
     let matches = App::new("share-clip")
-        .version("0.1.0")
+        .version("0.2.0")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
