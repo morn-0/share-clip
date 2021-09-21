@@ -3,6 +3,8 @@ share-clip
 
 ### 多设备剪切板共享
 
+<img src="share-clip.gif" />
+
 特性
 ------
 * 采用 Rust 实现。便捷/高性能
