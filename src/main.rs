@@ -221,8 +221,8 @@ async fn sub_clip_on_device(
             if confirm {
                 notify
                     .timeout(Timeout::Milliseconds(1000 * 30))
-                    .action("accept", "Accept") // IDENTIFIER, LABEL
-                    .action("reject", "Reject") // IDENTIFIER, LABEL
+                    .action("accept", "Accept")
+                    .action("reject", "Reject")
                     .show()?
                     .wait_for_action(|action| match action {
                         "accept" => {
