@@ -1,6 +1,6 @@
 [package]
 name = "share-clip"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["morning"]
 edition = "2018"
 description = "Multi-device clipboard sharing."
@@ -13,6 +13,7 @@ arboard = { version = "2", default-features = false, features = [ "image-data" ]
 base64 = { version = "0.13", default-features = false, features = [ "std" ] }
 bincode = { version = "1", default-features = false }
 clap = { version = "2", default-features = false }
+clipboard-master = { git = "https://github.com/cc-morning/clipboard-master.git" }
 crypto_box = { version = "0.7", default-features = false, features = [ "alloc", "u64_backend" ] }
 deadpool-redis = { version = "0.9", default-features = false, features = [ "rt_tokio_1" ] }
 futures-util = { version = "0.3", default-features = false }

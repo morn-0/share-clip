@@ -2,11 +2,12 @@ mod clip;
 mod encrypt;
 
 use crate::{
-    clip::{Clip, ClipContext},
+    clip::{Clip, ClipContext, ClipHandle},
     encrypt::Alice,
 };
 use anyhow::Result;
 use clap::{App, Arg};
+use clipboard_master::Master;
 use crypto_box::{PublicKey, SecretKey};
 use deadpool_redis::{Config, Connection, Pool};
 use futures_util::stream::StreamExt;
@@ -34,7 +35,7 @@ async fn main() -> Result<()> {
     let common_public_key = PublicKey::from(COMMON_PUBLIC_KEY);
 
     let matches = App::new("share-clip")
-        .version("0.3.1")
+        .version("0.3.2")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
@@ -65,7 +66,7 @@ async fn main() -> Result<()> {
             Arg::with_name("confirm")
                 .short("C")
                 .long("confirm")
-                .value_name("S")
+                .value_name("B")
                 .takes_value(true)
                 .required(false),
         )
@@ -89,7 +90,7 @@ async fn main() -> Result<()> {
         .unwrap_or(false);
 
     let pool = Arc::new(Config::from_url(url).create_pool()?);
-    let (clip, tx, mut rx) = Clip::new().await;
+    let (clip, mut rx) = Clip::new().await;
     let alice = Arc::new(
         Alice::new(
             pool.get().await?,
@@ -100,11 +101,9 @@ async fn main() -> Result<()> {
         .await,
     );
 
-    let (code_clone, name_clone) = (code.to_string(), name.to_string());
+    let publish_key = format!("sub_{}_{}", code, name);
     let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
     tokio::spawn(async move {
-        let publish_key = format!("sub_{}_{}", code_clone, name_clone);
-
         while let Some(clip_context) = rx.recv().await {
             let clip_context = alice_clone.encrypt(clip_context).await;
             let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
@@ -120,13 +119,13 @@ async fn main() -> Result<()> {
         }
     });
 
-    let clip_clone = clip.clone();
-    let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
-    tokio::spawn(async move {
-        let _ = sub_clip(clip_clone, pool_clone, alice_clone, name, code, confirm).await;
+    let (match_key, cache_key) = (format!("key:{}:*", code), format!("key:{}:{}", code, name));
+    let sub_clip_future = sub_clip(clip.clone(), pool, alice, match_key, cache_key, confirm);
+    tokio::spawn(async {
+        let _ = sub_clip_future.await;
     });
 
-    clip.listen(tx).await;
+    Master::new(ClipHandle { clip }).run()?;
     Ok(())
 }
 
@@ -134,13 +133,12 @@ async fn sub_clip(
     clip: Arc<Clip>,
     pool: Arc<Pool>,
     alice: Arc<Alice>,
-    name: String,
-    code: String,
+    match_key: String,
+    cache_key: String,
     confirm: bool,
 ) -> Result<()> {
     let mut subscribed = HashSet::new();
     let (sub_tx, mut sub_rx) = mpsc::channel::<String>(1024);
-    let (match_key, cache_key) = (format!("key:{}:*", code), format!("key:{}:{}", code, name));
 
     let clip_clone = clip.clone();
     let (alice_clone, pool_clone) = (alice.clone(), pool.clone());

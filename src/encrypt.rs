@@ -1,9 +1,11 @@
 use crate::clip::ClipContext;
 use crypto_box::{
     aead::{
-        consts::{B0, B1},
         generic_array::{
-            typenum::{UInt, UTerm},
+            typenum::{
+                bit::{B0, B1},
+                UInt, UTerm,
+            },
             GenericArray,
         },
         Aead,
