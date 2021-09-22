@@ -27,16 +27,15 @@ pub struct ClipContext {
 pub struct Clip {
     md5: Arc<RwLock<String>>,
     clipboard: Arc<RwLock<Clipboard>>,
+    tx: Sender<ClipContext>,
 }
 
 impl Clip {
-    pub async fn new() -> (Arc<Self>, Sender<ClipContext>, Receiver<ClipContext>) {
+    pub async fn new() -> (Arc<Self>, Receiver<ClipContext>) {
         Self::with_buffer(1024).await
     }
 
-    pub async fn with_buffer(
-        buffer: usize,
-    ) -> (Arc<Self>, Sender<ClipContext>, Receiver<ClipContext>) {
+    pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipContext>) {
         let md5 = Arc::new(RwLock::new(String::new()));
         let clipboard = Arc::new(RwLock::new(
             Clipboard::new().expect("Failed to create clipboard!"),
@@ -45,21 +44,20 @@ impl Clip {
 
         (
             Arc::new(Clip {
-                md5: md5.clone(),
-                clipboard: clipboard.clone(),
+                md5: md5,
+                clipboard: clipboard,
+                tx,
             }),
-            tx,
             rx,
         )
     }
 
     pub async fn set_clip(&self, clip: ClipContext) -> Result<()> {
-        let (mut pre_md5, mut clipboard) = (self.md5.write().await, self.clipboard.write().await);
-        let (prop, bytes) = (clip.prop, clip.bytes);
+        let mut pre_md5 = self.md5.write().await;
+        let mut clipboard = self.clipboard.write().await;
 
-        let md5 = format!("{:x}", md5::compute(&bytes));
-        pre_md5.clone_from(&md5);
-        pre_md5.shrink_to_fit();
+        let (prop, bytes) = (clip.prop, clip.bytes);
+        let md5 = &format!("{:x}", md5::compute(&bytes));
 
         match match clip.kinds {
             ClipContextKinds::TEXT => clipboard.set_text(String::from_utf8(bytes)?),
@@ -73,16 +71,19 @@ impl Clip {
             }
             ClipContextKinds::NONE => Err(arboard::Error::ContentNotAvailable),
         } {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                pre_md5.clone_from(md5);
+                pre_md5.shrink_to_fit();
+                Ok(())
+            }
             Err(err) => Err(Error::new(err)),
         }
     }
 
-    pub async fn listen(&self, tx: Sender<ClipContext>) {
-        let (md5, clipboard) = (self.md5.clone(), self.clipboard.clone());
-
+    pub async fn listen(&self) {
         loop {
-            let (mut curr_md5, mut clipboard) = (md5.write().await, clipboard.write().await);
+            let mut pre_md5 = self.md5.write().await;
+            let mut clipboard = self.clipboard.write().await;
 
             let (text, text_md5) = match clipboard.get_text() {
                 Ok(text) => {
@@ -115,8 +116,9 @@ impl Clip {
                 (vec![], vec![], String::from(""), ClipContextKinds::NONE)
             };
 
-            if !md5.eq("") && !curr_md5.eq(&md5) {
-                if let Ok(_) = tx
+            if !md5.eq("") && !pre_md5.eq(&md5) {
+                if let Ok(_) = self
+                    .tx
                     .send(ClipContext {
                         kinds: kinds,
                         prop: prop,
@@ -124,11 +126,11 @@ impl Clip {
                     })
                     .await
                 {
-                    curr_md5.clone_from(&md5);
-                    curr_md5.shrink_to_fit();
+                    pre_md5.clone_from(&md5);
+                    pre_md5.shrink_to_fit();
                 };
             }
-            drop(curr_md5);
+            drop(pre_md5);
             drop(clipboard);
 
             time::sleep(Duration::from_secs_f64(1.5)).await;

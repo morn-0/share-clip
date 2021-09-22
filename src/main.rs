@@ -89,7 +89,7 @@ async fn main() -> Result<()> {
         .unwrap_or(false);
 
     let pool = Arc::new(Config::from_url(url).create_pool()?);
-    let (clip, tx, mut rx) = Clip::new().await;
+    let (clip, mut rx) = Clip::new().await;
     let alice = Arc::new(
         Alice::new(
             pool.get().await?,
@@ -122,11 +122,20 @@ async fn main() -> Result<()> {
 
     let clip_clone = clip.clone();
     let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
+    let (match_key, cache_key) = (format!("key:{}:*", code), format!("key:{}:{}", code, name));
     tokio::spawn(async move {
-        let _ = sub_clip(clip_clone, pool_clone, alice_clone, name, code, confirm).await;
+        let _ = sub_clip(
+            clip_clone,
+            pool_clone,
+            alice_clone,
+            match_key,
+            cache_key,
+            confirm,
+        )
+        .await;
     });
 
-    clip.listen(tx).await;
+    clip.listen().await;
     Ok(())
 }
 
@@ -134,13 +143,12 @@ async fn sub_clip(
     clip: Arc<Clip>,
     pool: Arc<Pool>,
     alice: Arc<Alice>,
-    name: String,
-    code: String,
+    match_key: String,
+    cache_key: String,
     confirm: bool,
 ) -> Result<()> {
     let mut subscribed = HashSet::new();
     let (sub_tx, mut sub_rx) = mpsc::channel::<String>(1024);
-    let (match_key, cache_key) = (format!("key:{}:*", code), format!("key:{}:{}", code, name));
 
     let clip_clone = clip.clone();
     let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
