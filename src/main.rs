@@ -66,7 +66,7 @@ async fn main() -> Result<()> {
             Arg::with_name("confirm")
                 .short("C")
                 .long("confirm")
-                .value_name("S")
+                .value_name("B")
                 .takes_value(true)
                 .required(false),
         )
