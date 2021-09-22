@@ -1,26 +1,38 @@
 mod clip;
-mod plug;
+mod encrypt;
 
 use crate::{
     clip::{Clip, ClipContext},
-    plug::{encrypt::Encrypt, Plug},
+    encrypt::Alice,
 };
 use anyhow::Result;
 use clap::{App, Arg};
+use crypto_box::{PublicKey, SecretKey};
 use deadpool_redis::{Config, Connection, Pool};
 use futures_util::stream::StreamExt;
 use mimalloc::MiMalloc;
 use notify_rust::{Notification, Timeout};
 use redis::cmd;
-use rsa::RsaPrivateKey;
 use std::{collections::HashSet, error::Error, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+pub static COMMON_SECRET_KEY: [u8; 32] = [
+    89, 58, 40, 58, 231, 88, 28, 80, 165, 110, 86, 42, 196, 176, 182, 77, 144, 187, 183, 189, 108,
+    80, 40, 20, 179, 44, 164, 95, 115, 23, 217, 8,
+];
+pub static COMMON_PUBLIC_KEY: [u8; 32] = [
+    241, 237, 31, 170, 119, 229, 246, 190, 146, 125, 81, 95, 39, 36, 97, 243, 44, 4, 143, 24, 121,
+    16, 110, 194, 210, 64, 8, 49, 206, 178, 14, 32,
+];
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    let common_secret_key = SecretKey::from(COMMON_SECRET_KEY);
+    let common_public_key = PublicKey::from(COMMON_PUBLIC_KEY);
+
     let matches = App::new("share-clip")
         .version("0.3.0")
         .author("morning")
@@ -78,21 +90,23 @@ async fn main() -> Result<()> {
 
     let pool = Arc::new(Config::from_url(url).create_pool()?);
     let (clip, tx, mut rx) = Clip::new().await;
-    let clip = Arc::new(clip);
+    let alice = Arc::new(
+        Alice::new(
+            pool.get().await?,
+            format!("key:{}:{}", code, name),
+            common_secret_key,
+            common_public_key,
+        )
+        .await,
+    );
 
     let (code_clone, name_clone) = (code.to_string(), name.to_string());
-    let pool_clone = pool.clone();
+    let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
     tokio::spawn(async move {
         let publish_key = format!("sub_{}_{}", code_clone, name_clone);
-        let mut encrypt = Encrypt::new(
-            pool_clone.get().await.expect("Failed to get connection!"),
-            code_clone,
-            name_clone,
-        )
-        .await;
 
         while let Some(clip_context) = rx.recv().await {
-            let clip_context = encrypt.wrap(clip_context).await;
+            let clip_context = alice_clone.encrypt(clip_context).await;
             let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
 
             cmd("PUBLISH")
@@ -107,9 +121,9 @@ async fn main() -> Result<()> {
     });
 
     let clip_clone = clip.clone();
-    let pool_clone = pool.clone();
+    let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
     tokio::spawn(async move {
-        let _ = sub_clip(clip_clone, pool_clone, name, code, confirm).await;
+        let _ = sub_clip(clip_clone, pool_clone, alice_clone, name, code, confirm).await;
     });
 
     clip.listen(tx).await;
@@ -119,6 +133,7 @@ async fn main() -> Result<()> {
 async fn sub_clip(
     clip: Arc<Clip>,
     pool: Arc<Pool>,
+    alice: Arc<Alice>,
     name: String,
     code: String,
     confirm: bool,
@@ -128,12 +143,17 @@ async fn sub_clip(
     let (match_key, cache_key) = (format!("key:{}:*", code), format!("key:{}:{}", code, name));
 
     let clip_clone = clip.clone();
-    let pool_clone = pool.clone();
+    let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
     tokio::spawn(async move {
         loop {
             if let Some(key) = sub_rx.recv().await {
-                let dev_sub_future =
-                    sub_clip_on_device(clip_clone.clone(), pool_clone.clone(), key, confirm);
+                let dev_sub_future = sub_clip_on_device(
+                    clip_clone.clone(),
+                    pool_clone.clone(),
+                    alice_clone.clone(),
+                    key,
+                    confirm,
+                );
                 tokio::spawn(async {
                     let _ = dev_sub_future.await;
                 });
@@ -148,6 +168,12 @@ async fn sub_clip(
             .await?;
 
         for key in keys {
+            let rev_key = key.chars().rev().collect::<String>();
+            let key = rev_key[rev_key.find(':').unwrap() + 1..]
+                .chars()
+                .rev()
+                .collect::<String>();
+
             if !subscribed.contains(&key) && !key.eq(&cache_key) {
                 subscribed.insert(key.clone());
                 sub_tx.send(key).await?;
@@ -161,16 +187,10 @@ async fn sub_clip(
 async fn sub_clip_on_device(
     clip: Arc<Clip>,
     pool: Arc<Pool>,
+    alice: Arc<Alice>,
     key: String,
     confirm: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let decrypt_key = {
-        let bytes = cmd("GET")
-            .arg(key.clone())
-            .query_async::<_, Vec<u8>>(&mut pool.get().await?)
-            .await?;
-        bincode::deserialize::<RsaPrivateKey>(&bytes)?
-    };
     let (subscribe_key, name) = {
         let key_array = key.split(":").collect::<Vec<&str>>();
         let (code, name) = (*key_array.get(1).unwrap(), *key_array.get(2).unwrap());
@@ -184,8 +204,8 @@ async fn sub_clip_on_device(
         if let Some(msg) = pubsub.on_message().next().await {
             let binary = msg.get_payload::<Vec<u8>>()?;
 
-            let clip_content = bincode::deserialize::<ClipContext>(&binary).expect("");
-            let clip_content = Encrypt::dewrap(clip_content, &decrypt_key).await;
+            let clip_content = bincode::deserialize::<ClipContext>(&binary)?;
+            let clip_content = alice.decrypt(pool.get().await?, &key, clip_content).await?;
 
             let summary = format!("Clipboard sharing from {}", name);
             let body = match clip_content.kinds {

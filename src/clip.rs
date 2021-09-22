@@ -30,11 +30,13 @@ pub struct Clip {
 }
 
 impl Clip {
-    pub async fn new() -> (Self, Sender<ClipContext>, Receiver<ClipContext>) {
+    pub async fn new() -> (Arc<Self>, Sender<ClipContext>, Receiver<ClipContext>) {
         Self::with_buffer(1024).await
     }
 
-    pub async fn with_buffer(buffer: usize) -> (Self, Sender<ClipContext>, Receiver<ClipContext>) {
+    pub async fn with_buffer(
+        buffer: usize,
+    ) -> (Arc<Self>, Sender<ClipContext>, Receiver<ClipContext>) {
         let md5 = Arc::new(RwLock::new(String::new()));
         let clipboard = Arc::new(RwLock::new(
             Clipboard::new().expect("Failed to create clipboard!"),
@@ -42,10 +44,10 @@ impl Clip {
         let (tx, rx) = mpsc::channel::<ClipContext>(1024);
 
         (
-            Clip {
+            Arc::new(Clip {
                 md5: md5.clone(),
                 clipboard: clipboard.clone(),
-            },
+            }),
             tx,
             rx,
         )
