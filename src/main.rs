@@ -2,11 +2,12 @@ mod clip;
 mod encrypt;
 
 use crate::{
-    clip::{Clip, ClipContext},
+    clip::{Clip, ClipContext, ClipHandle},
     encrypt::Alice,
 };
 use anyhow::Result;
 use clap::{App, Arg};
+use clipboard_master::Master;
 use crypto_box::{PublicKey, SecretKey};
 use deadpool_redis::{Config, Connection, Pool};
 use futures_util::stream::StreamExt;
@@ -100,11 +101,9 @@ async fn main() -> Result<()> {
         .await,
     );
 
-    let (code_clone, name_clone) = (code.to_string(), name.to_string());
+    let publish_key = format!("sub_{}_{}", code, name);
     let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
     tokio::spawn(async move {
-        let publish_key = format!("sub_{}_{}", code_clone, name_clone);
-
         while let Some(clip_context) = rx.recv().await {
             let clip_context = alice_clone.encrypt(clip_context).await;
             let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
@@ -120,22 +119,13 @@ async fn main() -> Result<()> {
         }
     });
 
-    let clip_clone = clip.clone();
-    let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
     let (match_key, cache_key) = (format!("key:{}:*", code), format!("key:{}:{}", code, name));
-    tokio::spawn(async move {
-        let _ = sub_clip(
-            clip_clone,
-            pool_clone,
-            alice_clone,
-            match_key,
-            cache_key,
-            confirm,
-        )
-        .await;
+    let sub_clip_future = sub_clip(clip.clone(), pool, alice, match_key, cache_key, confirm);
+    tokio::spawn(async {
+        let _ = sub_clip_future.await;
     });
 
-    clip.listen().await;
+    Master::new(ClipHandle { clip }).run()?;
     Ok(())
 }
 

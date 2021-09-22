@@ -13,6 +13,7 @@ arboard = { version = "2", default-features = false, features = [ "image-data" ]
 base64 = { version = "0.13", default-features = false, features = [ "std" ] }
 bincode = { version = "1", default-features = false }
 clap = { version = "2", default-features = false }
+clipboard-master = { version = "3", default-features = false }
 crypto_box = { version = "0.7", default-features = false, features = [ "alloc", "u64_backend" ] }
 deadpool-redis = { version = "0.9", default-features = false, features = [ "rt_tokio_1" ] }
 futures-util = { version = "0.3", default-features = false }
