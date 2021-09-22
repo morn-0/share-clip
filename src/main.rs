@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
     let common_public_key = PublicKey::from(COMMON_PUBLIC_KEY);
 
     let matches = App::new("share-clip")
-        .version("0.3.0")
+        .version("0.3.1")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
