@@ -104,18 +104,19 @@ async fn main() -> Result<()> {
     let publish_key = format!("sub_{}_{}", code, name);
     let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
     tokio::spawn(async move {
-        while let Some(clip_context) = rx.recv().await {
-            let clip_context = alice_clone.encrypt(clip_context).await;
-            let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
+        loop {
+            if let Some(clip_context) = rx.recv().await {
+                let clip_context = alice_clone.encrypt(clip_context).await;
+                let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
 
-            cmd("PUBLISH")
-                .arg(&publish_key)
-                .arg(binary)
-                .query_async::<_, ()>(
-                    &mut pool_clone.get().await.expect("Failed to get connection!"),
-                )
-                .await
-                .expect("redis execution failed!");
+                let mut conn = pool_clone.get().await.expect("Failed to get connection!");
+                cmd("PUBLISH")
+                    .arg(&publish_key)
+                    .arg(binary)
+                    .query_async::<_, ()>(&mut conn)
+                    .await
+                    .expect("redis execution failed!");
+            }
         }
     });
 
@@ -160,9 +161,10 @@ async fn sub_clip(
     });
 
     loop {
+        let mut conn = pool.get().await?;
         let keys = cmd("KEYS")
             .arg(&match_key)
-            .query_async::<_, Vec<String>>(&mut pool.get().await?)
+            .query_async::<_, Vec<String>>(&mut conn)
             .await?;
 
         for key in keys {
@@ -178,7 +180,7 @@ async fn sub_clip(
             }
         }
 
-        time::sleep(Duration::from_secs_f64(1.5)).await;
+        time::sleep(Duration::from_secs(1)).await;
     }
 }
 
