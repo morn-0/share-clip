@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
             Arg::with_name("url")
                 .short("u")
                 .long("url")
-                .value_name("S")
+                .value_name("url")
                 .takes_value(true)
                 .required(true),
         )
@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
             Arg::with_name("code")
                 .short("c")
                 .long("code")
-                .value_name("S")
+                .value_name("value")
                 .takes_value(true)
                 .required(true),
         )
@@ -58,7 +58,7 @@ async fn main() -> Result<()> {
             Arg::with_name("name")
                 .short("n")
                 .long("name")
-                .value_name("S")
+                .value_name("value")
                 .takes_value(true)
                 .required(true),
         )
@@ -66,9 +66,8 @@ async fn main() -> Result<()> {
             Arg::with_name("confirm")
                 .short("C")
                 .long("confirm")
-                .value_name("B")
-                .takes_value(true)
-                .required(false),
+                .value_name("bool")
+                .takes_value(true),
         )
         .get_matches();
 
