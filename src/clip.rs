@@ -46,7 +46,7 @@ impl Clip {
         let (prop, bytes) = (clip.prop, clip.bytes);
         let md5 = format!("{:x}", md5::compute(&bytes));
 
-        match match clip.kinds {
+        let result = match clip.kinds {
             ClipContextKinds::TEXT => clipboard.set_text(String::from_utf8(bytes)?),
             ClipContextKinds::IMAGE => {
                 let img = ImageData {
@@ -57,7 +57,10 @@ impl Clip {
                 clipboard.set_image(img)
             }
             ClipContextKinds::NONE => Err(arboard::Error::ContentNotAvailable),
-        } {
+        };
+        drop(clipboard);
+
+        match result {
             Ok(_) => {
                 pre_md5.clone_from(&md5);
                 pre_md5.shrink_to_fit();
@@ -91,6 +94,7 @@ impl Clip {
         } else {
             (vec![], vec![], ClipContextKinds::NONE)
         };
+        drop(clipboard);
 
         if !ClipContextKinds::NONE.eq(&kinds) {
             let md5 = format!("{:x}", md5::compute(&bytes));
