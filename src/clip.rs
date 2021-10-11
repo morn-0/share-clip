@@ -36,7 +36,7 @@ impl Clip {
         let md5 = Arc::new(RwLock::new(String::new()));
         let (tx, rx) = mpsc::channel::<ClipContext>(1024);
 
-        (Arc::new(Clip { md5: md5, tx }), rx)
+        (Arc::new(Clip { md5, tx }), rx)
     }
 
     pub async fn set_clip(&self, clip: ClipContext) -> Result<()> {
