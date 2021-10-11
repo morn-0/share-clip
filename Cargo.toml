@@ -1,6 +1,6 @@
 [package]
 name = "share-clip"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["morning"]
 edition = "2018"
 description = "Multi-device clipboard sharing."
