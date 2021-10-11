@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, sync::Arc};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
-    RwLock,
+    Mutex,
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -22,8 +22,13 @@ pub struct ClipContext {
     pub bytes: Vec<u8>,
 }
 
+struct ClipCore {
+    md5: String,
+    clip: Clipboard,
+}
+
 pub struct Clip {
-    md5: Arc<RwLock<String>>,
+    core: Mutex<ClipCore>,
     tx: Sender<ClipContext>,
 }
 
@@ -33,37 +38,38 @@ impl Clip {
     }
 
     pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipContext>) {
-        let md5 = Arc::new(RwLock::new(String::new()));
+        let core = Mutex::new(ClipCore {
+            md5: String::new(),
+            clip: Clipboard::new().expect("Failed to create clipboard!"),
+        });
         let (tx, rx) = mpsc::channel::<ClipContext>(1024);
 
-        (Arc::new(Clip { md5, tx }), rx)
+        (Arc::new(Clip { core, tx }), rx)
     }
 
     pub async fn set_clip(&self, clip: ClipContext) -> Result<()> {
-        let mut pre_md5 = self.md5.write().await;
-        let mut clipboard = Clipboard::new().expect("Failed to create clipboard!");
+        let mut core = self.core.lock().await;
 
         let (prop, bytes) = (clip.prop, clip.bytes);
         let md5 = format!("{:x}", md5::compute(&bytes));
 
         let result = match clip.kinds {
-            ClipContextKinds::TEXT => clipboard.set_text(String::from_utf8(bytes)?),
+            ClipContextKinds::TEXT => core.clip.set_text(String::from_utf8(bytes)?),
             ClipContextKinds::IMAGE => {
                 let img = ImageData {
                     width: prop.get(1).unwrap().parse()?,
                     height: prop.get(0).unwrap().parse()?,
                     bytes: Cow::from(bytes),
                 };
-                clipboard.set_image(img)
+                core.clip.set_image(img)
             }
             ClipContextKinds::NONE => Err(arboard::Error::ContentNotAvailable),
         };
-        drop(clipboard);
 
         match result {
             Ok(_) => {
-                pre_md5.clone_from(&md5);
-                pre_md5.shrink_to_fit();
+                core.md5.clone_from(&md5);
+                core.md5.shrink_to_fit();
                 Ok(())
             }
             Err(err) => Err(Error::new(err)),
@@ -71,10 +77,9 @@ impl Clip {
     }
 
     pub async fn listen(&self) {
-        let mut pre_md5 = self.md5.write().await;
-        let mut clipboard = Clipboard::new().expect("Failed to create clipboard!");
+        let mut core = self.core.lock().await;
 
-        let (text, image) = (clipboard.get_text(), clipboard.get_image());
+        let (text, image) = (core.clip.get_text(), core.clip.get_image());
         let (prop, bytes, kinds) = if text.is_ok() {
             let text = text.unwrap();
             let bytes = text.as_bytes().to_vec();
@@ -94,12 +99,11 @@ impl Clip {
         } else {
             (vec![], vec![], ClipContextKinds::NONE)
         };
-        drop(clipboard);
 
         if !ClipContextKinds::NONE.eq(&kinds) {
             let md5 = format!("{:x}", md5::compute(&bytes));
 
-            if !pre_md5.eq(&md5) {
+            if !core.md5.eq(&md5) {
                 if let Ok(_) = self
                     .tx
                     .send(ClipContext {
@@ -109,8 +113,8 @@ impl Clip {
                     })
                     .await
                 {
-                    pre_md5.clone_from(&md5);
-                    pre_md5.shrink_to_fit();
+                    core.md5.clone_from(&md5);
+                    core.md5.shrink_to_fit();
                 };
             }
         }
