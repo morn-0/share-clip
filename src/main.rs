@@ -15,7 +15,7 @@ use mimalloc::MiMalloc;
 use notify_rust::{Notification, Timeout};
 use redis::cmd;
 use std::{collections::HashSet, error::Error, sync::Arc, time::Duration};
-use tokio::{sync::mpsc, time};
+use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time};
 
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
@@ -31,9 +31,6 @@ pub static COMMON_PUBLIC_KEY: [u8; 32] = [
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let common_secret_key = SecretKey::from(COMMON_SECRET_KEY);
-    let common_public_key = PublicKey::from(COMMON_PUBLIC_KEY);
-
     let matches = App::new("share-clip")
         .version("0.3.2")
         .author("morning")
@@ -44,7 +41,7 @@ async fn main() -> Result<()> {
                 .long("url")
                 .value_name("url")
                 .takes_value(true)
-                .required(true),
+                .required_unless("gen-key"),
         )
         .arg(
             Arg::with_name("code")
@@ -52,7 +49,7 @@ async fn main() -> Result<()> {
                 .long("code")
                 .value_name("value")
                 .takes_value(true)
-                .required(true),
+                .required_unless("gen-key"),
         )
         .arg(
             Arg::with_name("name")
@@ -60,7 +57,7 @@ async fn main() -> Result<()> {
                 .long("name")
                 .value_name("value")
                 .takes_value(true)
-                .required(true),
+                .required_unless("gen-key"),
         )
         .arg(
             Arg::with_name("confirm")
@@ -69,11 +66,35 @@ async fn main() -> Result<()> {
                 .value_name("bool")
                 .takes_value(true),
         )
+        .arg(
+            Arg::with_name("secret-key")
+                .long("secret-key")
+                .value_name("file")
+                .takes_value(true)
+                .requires("public-key"),
+        )
+        .arg(
+            Arg::with_name("public-key")
+                .long("public-key")
+                .value_name("file")
+                .takes_value(true)
+                .requires("secret-key"),
+        )
+        .arg(
+            Arg::with_name("gen-key")
+                .long("gen-key")
+                .help("Generate key pairs"),
+        )
         .get_matches();
+
+    if matches.is_present("gen-key") {
+        encrypt::gen_key().await?;
+        return Ok(());
+    };
 
     let url = match matches.value_of("url") {
         Some(v) => v.to_string(),
-        None => panic!("Requires redis link!"),
+        None => panic!("Requires redis url!"),
     };
     let code = match matches.value_of("code") {
         Some(v) => v.to_string(),
@@ -87,6 +108,28 @@ async fn main() -> Result<()> {
         .value_of("confirm")
         .map(|c| c.parse::<bool>().unwrap())
         .unwrap_or(false);
+
+    let secret_key = match matches.value_of("secret-key") {
+        Some(v) => {
+            let mut file = File::open(v).await?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).await?;
+            bincode::deserialize::<[u8; 32]>(&buffer)?
+        }
+        None => COMMON_SECRET_KEY,
+    };
+    let public_key = match matches.value_of("public-key") {
+        Some(v) => {
+            let mut file = File::open(v).await?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).await?;
+            bincode::deserialize::<[u8; 32]>(&buffer)?
+        }
+        None => COMMON_PUBLIC_KEY,
+    };
+
+    let common_secret_key = SecretKey::from(secret_key);
+    let common_public_key = PublicKey::from(public_key);
 
     let pool = Arc::new(Config::from_url(url).create_pool()?);
     let (clip, mut rx) = Clip::new().await;

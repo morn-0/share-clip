@@ -15,6 +15,7 @@ use crypto_box::{
 };
 use deadpool_redis::Connection;
 use redis::cmd;
+use tokio::{fs::File, io::AsyncWriteExt};
 
 pub struct Alice {
     encrypt: SalsaBox,
@@ -111,4 +112,20 @@ impl Alice {
 
         Ok(clip)
     }
+}
+
+pub async fn gen_key() -> anyhow::Result<()> {
+    let (secret_key, public_key) = {
+        let secret_key = SecretKey::generate(&mut OsRng);
+        let public_key = secret_key.public_key();
+        (secret_key, public_key)
+    };
+
+    let mut secret_file = File::create("secret_key").await?;
+    secret_file.write_all(&secret_key.to_bytes()).await?;
+
+    let mut public_file = File::create("public_key").await?;
+    public_file.write_all(public_key.as_bytes()).await?;
+
+    Ok(())
 }
