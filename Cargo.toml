@@ -9,7 +9,7 @@ repository = "https://github.com/cc-morning/share-clip"
 
 [dependencies]
 anyhow = { version = "1", default-features = false, features = [ "std" ] }
-arboard = { version = "2", default-features = false, features = [ "image-data" ] }
+arboard = { version = "2", default-features = false, features = [ "image-data", "wayland-data-control" ] }
 base64 = { version = "0.13", default-features = false, features = [ "std" ] }
 bincode = { version = "1", default-features = false }
 clap = { version = "2", default-features = false }
