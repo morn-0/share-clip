@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use crate::clip::ClipContext;
 use crypto_box::{
     aead::{
@@ -80,7 +82,7 @@ impl Alice {
         mut conn: Connection,
         key: &String,
         mut clip: ClipContext,
-    ) -> anyhow::Result<ClipContext> {
+    ) -> Result<ClipContext, Box<dyn Error>> {
         let data = cmd("GET")
             .arg({
                 let mut key = key.clone();
@@ -114,7 +116,7 @@ impl Alice {
     }
 }
 
-pub async fn gen_key() -> anyhow::Result<()> {
+pub async fn gen_key() -> Result<(), Box<dyn Error>> {
     let (secret_key, public_key) = {
         let secret_key = SecretKey::generate(&mut OsRng);
         let public_key = secret_key.public_key();

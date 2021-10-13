@@ -1,8 +1,8 @@
-use anyhow::{Error, Result};
 use arboard::{Clipboard, ImageData};
+use blake3::Hash;
 use clipboard_master::{CallbackResult, ClipboardHandler};
 use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, error::Error, sync::Arc};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Mutex,
@@ -23,7 +23,7 @@ pub struct ClipContext {
 }
 
 struct ClipCore {
-    md5: String,
+    hash: Hash,
     clip: Clipboard,
 }
 
@@ -39,7 +39,7 @@ impl Clip {
 
     pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipContext>) {
         let core = Mutex::new(ClipCore {
-            md5: String::new(),
+            hash: blake3::hash(b""),
             clip: Clipboard::new().expect("Failed to create clipboard!"),
         });
         let (tx, rx) = mpsc::channel::<ClipContext>(1024);
@@ -47,11 +47,11 @@ impl Clip {
         (Arc::new(Clip { core, tx }), rx)
     }
 
-    pub async fn set_clip(&self, clip: ClipContext) -> Result<()> {
+    pub async fn set_clip(&self, clip: ClipContext) -> Result<(), Box<dyn Error>> {
         let mut core = self.core.lock().await;
 
         let (prop, bytes) = (clip.prop, clip.bytes);
-        let md5 = format!("{:x}", md5::compute(&bytes));
+        let hash = blake3::hash(&bytes);
 
         let result = match clip.kinds {
             ClipContextKinds::TEXT => core.clip.set_text(String::from_utf8(bytes)?),
@@ -68,11 +68,10 @@ impl Clip {
 
         match result {
             Ok(_) => {
-                core.md5.clone_from(&md5);
-                core.md5.shrink_to_fit();
+                core.hash.clone_from(&hash);
                 Ok(())
             }
-            Err(err) => Err(Error::new(err)),
+            Err(err) => Err(Box::new(err)),
         }
     }
 
@@ -101,9 +100,9 @@ impl Clip {
         };
 
         if !ClipContextKinds::NONE.eq(&kinds) {
-            let md5 = format!("{:x}", md5::compute(&bytes));
+            let hash = blake3::hash(&bytes);
 
-            if !core.md5.eq(&md5) {
+            if !core.hash.eq(&hash) {
                 if let Ok(_) = self
                     .tx
                     .send(ClipContext {
@@ -113,8 +112,7 @@ impl Clip {
                     })
                     .await
                 {
-                    core.md5.clone_from(&md5);
-                    core.md5.shrink_to_fit();
+                    core.hash.clone_from(&hash);
                 };
             }
         }

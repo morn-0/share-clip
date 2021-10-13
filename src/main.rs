@@ -5,7 +5,6 @@ use crate::{
     clip::{Clip, ClipContext, ClipHandle},
     encrypt::Alice,
 };
-use anyhow::Result;
 use clap::{App, Arg};
 use clipboard_master::Master;
 use crypto_box::{PublicKey, SecretKey};
@@ -30,7 +29,7 @@ pub static COMMON_PUBLIC_KEY: [u8; 32] = [
 ];
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("share-clip")
         .version("0.3.3")
         .author("morning")
@@ -179,7 +178,7 @@ async fn sub_clip(
     match_key: String,
     cache_key: String,
     confirm: bool,
-) -> Result<()> {
+) -> Result<(), Box<dyn Error>> {
     let mut subscribed = HashSet::new();
     let (sub_tx, mut sub_rx) = mpsc::channel::<String>(1024);
 
