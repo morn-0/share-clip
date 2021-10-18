@@ -16,6 +16,7 @@ use crypto_box::{
     PublicKey, SalsaBox, SecretKey,
 };
 use deadpool_redis::Connection;
+use minivec::MiniVec;
 use redis::cmd;
 use tokio::{fs::File, io::AsyncWriteExt};
 
@@ -69,10 +70,11 @@ impl Alice {
     }
 
     pub async fn encrypt(&self, mut clip: ClipContext) -> ClipContext {
-        clip.bytes = self
+        let vec = self
             .encrypt
             .encrypt(&self.nonce, &clip.bytes[..])
             .expect("Encryption failure!");
+        clip.bytes = MiniVec::from(vec.as_slice());
 
         clip
     }
@@ -108,9 +110,10 @@ impl Alice {
             );
 
         let decrypt = SalsaBox::new(&priv_public_key, &self.comm_secret_key);
-        clip.bytes = decrypt
+        let vec = decrypt
             .decrypt(nonce, &clip.bytes[..])
             .expect("Decryption failure!");
+        clip.bytes = MiniVec::from(vec.as_slice());
 
         Ok(clip)
     }

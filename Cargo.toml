@@ -17,10 +17,12 @@ crypto_box = { version = "0.7", default-features = false, features = [ "alloc", 
 deadpool-redis = { version = "0.9", default-features = false, features = [ "rt_tokio_1" ] }
 futures-util = { version = "0.3", default-features = false }
 notify-rust = { version = "4", default-features = false, features = [ "z" ] }
+minivec =  { version = "0.4", default-features = false, features = [ "serde" ] }
 mimalloc = { version = "0.1", default-features = false }
 rand = { version = "0.8", default-features = false, features = [ "std" ] }
 redis = { version = "0.21", default-features = false, features = [ "tokio-comp" ] }
 serde = { version = "1", default-features = false, features = [ "derive" ] }
+smallvec = { version = "1", default-features = false, features = [ "serde" ] }
 tokio = { version = "1", default-features = false, features = [ "macros", "rt-multi-thread", "fs", "sync", "time" ] }
 
 [profile.release]
