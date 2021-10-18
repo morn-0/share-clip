@@ -10,14 +10,22 @@ use clipboard_master::Master;
 use crypto_box::{PublicKey, SecretKey};
 use deadpool_redis::{Config, Connection, Pool};
 use futures_util::stream::StreamExt;
+#[cfg(target_os = "windows")]
 use mimalloc::MiMalloc;
 use notify_rust::{Notification, Timeout};
 use redis::cmd;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use snmalloc_rs::SnMalloc;
 use std::{collections::HashSet, error::Error, sync::Arc, time::Duration};
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time};
 
+#[cfg(target_os = "windows")]
 #[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: SnMalloc = SnMalloc;
 
 pub static COMMON_SECRET_KEY: [u8; 32] = [
     89, 58, 40, 58, 231, 88, 28, 80, 165, 110, 86, 42, 196, 176, 182, 77, 144, 187, 183, 189, 108,
@@ -290,7 +298,7 @@ async fn sub_clip_on_device(
                 };
             }
 
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             match clip.set_clip(clip_content).await {
                 Ok(_) => {
                     notify.timeout(Timeout::Milliseconds(1000 * 5)).show()?;

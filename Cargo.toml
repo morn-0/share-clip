@@ -22,6 +22,7 @@ mimalloc = { version = "0.1", default-features = false }
 rand = { version = "0.8", default-features = false, features = [ "std" ] }
 redis = { version = "0.21", default-features = false, features = [ "tokio-comp" ] }
 serde = { version = "1", default-features = false, features = [ "derive" ] }
+snmalloc-rs = { version = "0.2", default-features = false, features = [ "build_cc" ] }
 smallvec = { version = "1", default-features = false, features = [ "serde" ] }
 tokio = { version = "1", default-features = false, features = [ "macros", "rt-multi-thread", "fs", "sync", "time" ] }
 
