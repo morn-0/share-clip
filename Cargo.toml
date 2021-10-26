@@ -1,6 +1,6 @@
 [package]
 name = "share-clip"
-version = "0.3.3"
+version = "0.3.4"
 authors = ["morning"]
 edition = "2018"
 description = "Multi-device clipboard sharing."
@@ -8,21 +8,22 @@ homepage = "https://github.com/cc-morning/share-clip"
 repository = "https://github.com/cc-morning/share-clip"
 
 [dependencies]
-anyhow = { version = "1", default-features = false, features = [ "std" ] }
 arboard = { version = "2", default-features = false, features = [ "image-data", "wayland-data-control" ] }
-base64 = { version = "0.13", default-features = false, features = [ "std" ] }
 bincode = { version = "1", default-features = false }
+blake3 = { version = "1", default-features = false }
 clap = { version = "2", default-features = false }
-clipboard-master = { git = "https://github.com/cc-morning/clipboard-master.git" }
+clipboard-master = { version = "3", default-features = false }
 crypto_box = { version = "0.7", default-features = false, features = [ "alloc", "u64_backend" ] }
 deadpool-redis = { version = "0.9", default-features = false, features = [ "rt_tokio_1" ] }
 futures-util = { version = "0.3", default-features = false }
 notify-rust = { version = "4", default-features = false, features = [ "z" ] }
-md5 = { version = "0.7", default-features = false }
+minivec =  { version = "0.4", default-features = false, features = [ "serde" ] }
 mimalloc = { version = "0.1", default-features = false }
 rand = { version = "0.8", default-features = false, features = [ "std" ] }
 redis = { version = "0.21", default-features = false, features = [ "tokio-comp" ] }
 serde = { version = "1", default-features = false, features = [ "derive" ] }
+snmalloc-rs = { version = "0.2", default-features = false, features = [ "build_cc" ] }
+smallvec = { version = "1", default-features = false, features = [ "serde" ] }
 tokio = { version = "1", default-features = false, features = [ "macros", "rt-multi-thread", "fs", "sync", "time" ] }
 
 [profile.release]

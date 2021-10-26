@@ -1,3 +1,5 @@
+use std::error::Error;
+
 use crate::clip::ClipContext;
 use crypto_box::{
     aead::{
@@ -14,6 +16,7 @@ use crypto_box::{
     PublicKey, SalsaBox, SecretKey,
 };
 use deadpool_redis::Connection;
+use minivec::MiniVec;
 use redis::cmd;
 use tokio::{fs::File, io::AsyncWriteExt};
 
@@ -67,10 +70,11 @@ impl Alice {
     }
 
     pub async fn encrypt(&self, mut clip: ClipContext) -> ClipContext {
-        clip.bytes = self
+        let vec = self
             .encrypt
             .encrypt(&self.nonce, &clip.bytes[..])
             .expect("Encryption failure!");
+        clip.bytes = MiniVec::from(vec.as_slice());
 
         clip
     }
@@ -80,7 +84,7 @@ impl Alice {
         mut conn: Connection,
         key: &String,
         mut clip: ClipContext,
-    ) -> anyhow::Result<ClipContext> {
+    ) -> Result<ClipContext, Box<dyn Error>> {
         let data = cmd("GET")
             .arg({
                 let mut key = key.clone();
@@ -106,15 +110,16 @@ impl Alice {
             );
 
         let decrypt = SalsaBox::new(&priv_public_key, &self.comm_secret_key);
-        clip.bytes = decrypt
+        let vec = decrypt
             .decrypt(nonce, &clip.bytes[..])
             .expect("Decryption failure!");
+        clip.bytes = MiniVec::from(vec.as_slice());
 
         Ok(clip)
     }
 }
 
-pub async fn gen_key() -> anyhow::Result<()> {
+pub async fn gen_key() -> Result<(), Box<dyn Error>> {
     let (secret_key, public_key) = {
         let secret_key = SecretKey::generate(&mut OsRng);
         let public_key = secret_key.public_key();

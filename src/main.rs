@@ -5,20 +5,27 @@ use crate::{
     clip::{Clip, ClipContext, ClipHandle},
     encrypt::Alice,
 };
-use anyhow::Result;
 use clap::{App, Arg};
 use clipboard_master::Master;
 use crypto_box::{PublicKey, SecretKey};
 use deadpool_redis::{Config, Connection, Pool};
 use futures_util::stream::StreamExt;
+#[cfg(target_os = "windows")]
 use mimalloc::MiMalloc;
 use notify_rust::{Notification, Timeout};
 use redis::cmd;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use snmalloc_rs::SnMalloc;
 use std::{collections::HashSet, error::Error, sync::Arc, time::Duration};
-use tokio::{fs::File, io::AsyncReadExt, sync::mpsc, time};
+use tokio::{fs::File, io::AsyncReadExt, time};
 
+#[cfg(target_os = "windows")]
 #[global_allocator]
-static GLOBAL: MiMalloc = MiMalloc;
+static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[global_allocator]
+static GLOBAL_ALLOCATOR: SnMalloc = SnMalloc;
 
 pub static COMMON_SECRET_KEY: [u8; 32] = [
     89, 58, 40, 58, 231, 88, 28, 80, 165, 110, 86, 42, 196, 176, 182, 77, 144, 187, 183, 189, 108,
@@ -30,9 +37,9 @@ pub static COMMON_PUBLIC_KEY: [u8; 32] = [
 ];
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("share-clip")
-        .version("0.3.3")
+        .version("0.3.4")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
@@ -162,71 +169,57 @@ async fn main() -> Result<()> {
         }
     });
 
-    let (match_key, cache_key) = (format!("key:{}:*", code), format!("key:{}:{}", code, name));
-    let sub_clip_future = sub_clip(clip.clone(), pool, alice, match_key, cache_key, confirm);
-    tokio::spawn(async {
-        let _ = sub_clip_future.await;
+    let (clip_clione, match_key, cache_key) = (
+        clip.clone(),
+        format!("key:{}:*", code),
+        format!("key:{}:{}", code, name),
+    );
+    tokio::spawn(async move {
+        let _ = subscribe(clip_clione, pool, alice, match_key, cache_key, confirm).await;
     });
 
     Master::new(ClipHandle { clip }).run()?;
     Ok(())
 }
 
-async fn sub_clip(
+async fn subscribe(
     clip: Arc<Clip>,
     pool: Arc<Pool>,
     alice: Arc<Alice>,
     match_key: String,
     cache_key: String,
     confirm: bool,
-) -> Result<()> {
-    let mut subscribed = HashSet::new();
-    let (sub_tx, mut sub_rx) = mpsc::channel::<String>(1024);
-
-    let clip_clone = clip.clone();
-    let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
-    tokio::spawn(async move {
-        loop {
-            if let Some(key) = sub_rx.recv().await {
-                let dev_sub_future = sub_clip_on_device(
-                    clip_clone.clone(),
-                    pool_clone.clone(),
-                    alice_clone.clone(),
-                    key,
-                    confirm,
-                );
-                tokio::spawn(async {
-                    let _ = dev_sub_future.await;
-                });
-            }
-        }
-    });
+) -> Result<(), Box<dyn Error>> {
+    let mut ignore = HashSet::new();
 
     loop {
-        let mut conn = pool.get().await?;
-        let keys = cmd("KEYS")
+        for key in cmd("KEYS")
             .arg(&match_key)
-            .query_async::<_, Vec<String>>(&mut conn)
-            .await?;
-
-        for key in keys {
+            .query_async::<_, Vec<String>>(&mut pool.get().await?)
+            .await?
+        {
             let rev_key = key.chars().rev().collect::<String>();
             let key = rev_key[rev_key.find(':').unwrap() + 1..]
                 .chars()
                 .rev()
                 .collect::<String>();
 
-            if !subscribed.contains(&key) && !key.eq(&cache_key) {
-                subscribed.insert(key.clone());
-                sub_tx.send(key).await?;
+            if !ignore.contains(&key) && !key.eq(&cache_key) {
+                ignore.insert(key.clone());
+
+                let (clip_clone, pool_clone, alice_clone) =
+                    (clip.clone(), pool.clone(), alice.clone());
+                tokio::spawn(async move {
+                    let _ = on_device(clip_clone, pool_clone, alice_clone, key, confirm).await;
+                });
             }
         }
 
-        time::sleep(Duration::from_secs(1)).await;
+        time::sleep(Duration::from_secs_f64(5.0)).await;
     }
 }
 
-async fn sub_clip_on_device(
+async fn on_device(
     clip: Arc<Clip>,
     pool: Arc<Pool>,
     alice: Arc<Alice>,
@@ -291,7 +284,7 @@ async fn sub_clip_on_device(
                 };
             }
 
-            #[cfg(not(target_os = "linux"))]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             match clip.set_clip(clip_content).await {
                 Ok(_) => {
                     notify.timeout(Timeout::Milliseconds(1000 * 5)).show()?;
