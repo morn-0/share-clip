@@ -39,7 +39,7 @@ pub static COMMON_PUBLIC_KEY: [u8; 32] = [
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("share-clip")
-        .version("0.3.3")
+        .version("0.3.4")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
