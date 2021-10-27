@@ -9,15 +9,28 @@ use clap::{App, Arg};
 use clipboard_master::Master;
 use crypto_box::{PublicKey, SecretKey};
 use deadpool_redis::{Config, Connection, Pool};
-use futures_util::stream::StreamExt;
 #[cfg(target_os = "windows")]
 use mimalloc::MiMalloc;
 use notify_rust::{Notification, Timeout};
 use redis::cmd;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 use snmalloc_rs::SnMalloc;
-use std::{collections::HashSet, error::Error, sync::Arc, time::Duration};
-use tokio::{fs::File, io::AsyncReadExt, time};
+use std::{
+    collections::HashMap,
+    error::Error,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread,
+    time::Duration,
+};
+use tokio::{
+    fs::File,
+    io::AsyncReadExt,
+    time::{self, timeout},
+};
+use tokio_stream::StreamExt;
 
 #[cfg(target_os = "windows")]
 #[global_allocator]
@@ -35,6 +48,9 @@ pub static COMMON_PUBLIC_KEY: [u8; 32] = [
     241, 237, 31, 170, 119, 229, 246, 190, 146, 125, 81, 95, 39, 36, 97, 243, 44, 4, 143, 24, 121,
     16, 110, 194, 210, 64, 8, 49, 206, 178, 14, 32,
 ];
+
+static RUNNING: AtomicBool = AtomicBool::new(true);
+static GLOBAL_TIMEOUT: f64 = 2.5;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -116,6 +132,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .map(|c| c.parse::<bool>().unwrap())
         .unwrap_or(false);
 
+    // Initialization redis
+    let pool = Arc::new(Config::from_url(url).create_pool()?);
+    // Initialization clipboard
+    let (clip, mut rx) = Clip::new().await;
+    // Initialization alice
     let secret_key = match matches.value_of("secret-key") {
         Some(v) => {
             let mut file = File::open(v).await?;
@@ -134,89 +155,112 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
         None => COMMON_PUBLIC_KEY,
     };
-
-    let common_secret_key = SecretKey::from(secret_key);
-    let common_public_key = PublicKey::from(public_key);
-
-    let pool = Arc::new(Config::from_url(url).create_pool()?);
-    let (clip, mut rx) = Clip::new().await;
     let alice = Arc::new(
         Alice::new(
             pool.get().await?,
             format!("key:{}:{}", code, name),
-            common_secret_key,
-            common_public_key,
+            SecretKey::from(secret_key),
+            PublicKey::from(public_key),
         )
         .await,
     );
 
-    let publish_key = format!("sub_{}_{}", code, name);
-    let (alice_clone, pool_clone) = (alice.clone(), pool.clone());
-    tokio::spawn(async move {
-        loop {
-            if let Some(clip_context) = rx.recv().await {
-                let clip_context = alice_clone.encrypt(clip_context).await;
-                let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
+    let wait = Duration::from_secs_f64(GLOBAL_TIMEOUT);
 
-                let mut conn = pool_clone.get().await.expect("Failed to get connection!");
-                cmd("PUBLISH")
-                    .arg(&publish_key)
-                    .arg(binary)
-                    .query_async::<_, ()>(&mut conn)
+    // Run publisher
+    let publisher = {
+        let (alice_clone, pool_clone, publish_key) = (
+            alice.clone(),
+            pool.clone(),
+            format!("sub_{}_{}", code, name),
+        );
+
+        let publisher = async move {
+            while RUNNING.load(Ordering::SeqCst) {
+                if let Ok(Some(clip_context)) = timeout(wait, rx.recv()).await {
+                    let clip_context = alice_clone.encrypt(clip_context).await;
+                    let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
+
+                    let mut conn = pool_clone.get().await.expect("Failed to get connection!");
+                    cmd("PUBLISH")
+                        .arg(&publish_key)
+                        .arg(binary)
+                        .query_async::<_, ()>(&mut conn)
+                        .await
+                        .expect("redis execution failed!");
+                }
+            }
+        };
+
+        tokio::spawn(publisher)
+    };
+
+    // Run subscriber
+    let subscriber = {
+        let (clip_clone, match_key, cache_key) = (
+            clip.clone(),
+            format!("key:{}:*", code),
+            format!("key:{}:{}", code, name),
+        );
+
+        let subscriber = async move {
+            let mut device_futures = HashMap::new();
+
+            while RUNNING.load(Ordering::SeqCst) {
+                let keys = cmd("KEYS")
+                    .arg(&match_key)
+                    .query_async::<_, Vec<String>>(
+                        &mut pool.get().await.expect("Failed to get connection!"),
+                    )
                     .await
                     .expect("redis execution failed!");
+
+                for key in keys {
+                    let rev_key = key.chars().rev().collect::<String>();
+                    let key = rev_key[rev_key.find(':').unwrap() + 1..]
+                        .chars()
+                        .rev()
+                        .collect::<String>();
+
+                    if device_futures.contains_key(&key) || key.eq(&cache_key) {
+                        continue;
+                    }
+
+                    let (clip_clone, pool_clone, alice_clone) =
+                        (clip_clone.clone(), pool.clone(), alice.clone());
+                    device_futures.insert(
+                        key.clone(),
+                        tokio::spawn(async move {
+                            let _ =
+                                on_device(clip_clone, pool_clone, alice_clone, key, confirm).await;
+                        }),
+                    );
+                }
+
+                time::sleep(wait).await;
             }
-        }
+
+            for f in device_futures.values_mut() {
+                let _ = f.await;
+            }
+        };
+
+        tokio::spawn(subscriber)
+    };
+
+    // Run Listener
+    thread::spawn(|| {
+        let _ = Master::new(ClipHandle { clip }).run();
     });
 
-    let (clip_clione, match_key, cache_key) = (
-        clip.clone(),
-        format!("key:{}:*", code),
-        format!("key:{}:{}", code, name),
-    );
-    tokio::spawn(async move {
-        let _ = subscribe(clip_clione, pool, alice, match_key, cache_key, confirm).await;
-    });
+    tokio::signal::ctrl_c().await.unwrap();
+    RUNNING.store(false, Ordering::SeqCst);
 
-    Master::new(ClipHandle { clip }).run()?;
+    // Wait for resource release
+    publisher.await?;
+    subscriber.await?;
+
     Ok(())
-}
-
-async fn subscribe(
-    clip: Arc<Clip>,
-    pool: Arc<Pool>,
-    alice: Arc<Alice>,
-    match_key: String,
-    cache_key: String,
-    confirm: bool,
-) -> Result<(), Box<dyn Error>> {
-    let mut ignore = HashSet::new();
-
-    loop {
-        for key in cmd("KEYS")
-            .arg(&match_key)
-            .query_async::<_, Vec<String>>(&mut pool.get().await?)
-            .await?
-        {
-            let rev_key = key.chars().rev().collect::<String>();
-            let key = rev_key[rev_key.find(':').unwrap() + 1..]
-                .chars()
-                .rev()
-                .collect::<String>();
-
-            if !ignore.contains(&key) && !key.eq(&cache_key) {
-                ignore.insert(key.clone());
-
-                let (clip_clone, pool_clone, alice_clone) =
-                    (clip.clone(), pool.clone(), alice.clone());
-                tokio::spawn(async move {
-                    let _ = on_device(clip_clone, pool_clone, alice_clone, key, confirm).await;
-                });
-            }
-        }
-
-        time::sleep(Duration::from_secs_f64(5.0)).await;
-    }
 }
 
 async fn on_device(
@@ -234,9 +278,12 @@ async fn on_device(
 
     let mut pubsub = Connection::take(pool.get().await?).into_pubsub();
     pubsub.subscribe(subscribe_key).await?;
+    let mut message = pubsub.on_message();
 
-    loop {
-        if let Some(msg) = pubsub.on_message().next().await {
+    let wait = Duration::from_secs_f64(GLOBAL_TIMEOUT);
+
+    while RUNNING.load(Ordering::SeqCst) {
+        if let Ok(Some(msg)) = timeout(wait, message.next()).await {
             let binary = msg.get_payload::<Vec<u8>>()?;
 
             let clip_content = bincode::deserialize::<ClipContext>(&binary)?;
@@ -293,4 +340,6 @@ async fn on_device(
             };
         }
     }
+
+    Ok(())
 }

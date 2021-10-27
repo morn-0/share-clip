@@ -128,7 +128,8 @@ pub struct ClipHandle {
 }
 
 impl ClipboardHandler for ClipHandle {
-    fn on_clipboard_change(&mut self) -> CallbackResult {
+    #[tokio::main]
+    async fn on_clipboard_change(&mut self) -> CallbackResult {
         let clip = self.clip.clone();
         tokio::spawn(async move {
             clip.listen().await;

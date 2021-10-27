@@ -15,7 +15,6 @@ clap = { version = "2", default-features = false }
 clipboard-master = { git = "https://github.com/cc-morning/clipboard-master.git" }
 crypto_box = { version = "0.7", default-features = false, features = [ "alloc", "u64_backend" ] }
 deadpool-redis = { version = "0.9", default-features = false, features = [ "rt_tokio_1" ] }
-futures-util = { version = "0.3", default-features = false }
 notify-rust = { version = "4", default-features = false, features = [ "z" ] }
 minivec =  { version = "0.4", default-features = false, features = [ "serde" ] }
 mimalloc = { version = "0.1", default-features = false }
@@ -24,7 +23,8 @@ redis = { version = "0.21", default-features = false, features = [ "tokio-comp" 
 serde = { version = "1", default-features = false, features = [ "derive" ] }
 snmalloc-rs = { version = "0.2", default-features = false, features = [ "build_cc" ] }
 smallvec = { version = "1", default-features = false, features = [ "serde" ] }
-tokio = { version = "1", default-features = false, features = [ "macros", "rt-multi-thread", "fs", "sync", "time" ] }
+tokio = { version = "1", default-features = false, features = [ "macros", "rt-multi-thread", "fs", "sync", "time", "signal" ] }
+tokio-stream = { version = "0.1", default-features = false, features = [ "time" ]  }
 
 [profile.release]
 lto = true
