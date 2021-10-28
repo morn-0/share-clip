@@ -1,3 +1,4 @@
+use crate::RUNNING;
 use arboard::{Clipboard as _Clipboard, ImageData};
 use blake3::Hash;
 use clipboard_master::{CallbackResult, ClipboardHandler};
@@ -14,8 +15,6 @@ use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Mutex,
 };
-
-use crate::RUNNING;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ClipboardContentKinds {
