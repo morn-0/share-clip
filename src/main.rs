@@ -9,11 +9,11 @@ use clap::{App, Arg};
 use clipboard_master::Master;
 use crypto_box::{PublicKey, SecretKey};
 use deadpool_redis::{Config, Connection, Pool};
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use mimalloc::MiMalloc;
 use notify_rust::{Notification, Timeout};
 use redis::cmd;
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 use snmalloc_rs::SnMalloc;
 use std::{
     collections::HashMap,
@@ -32,11 +32,11 @@ use tokio::{
 };
 use tokio_stream::StreamExt;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: MiMalloc = MiMalloc;
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[cfg(target_os = "linux")]
 #[global_allocator]
 static GLOBAL_ALLOCATOR: SnMalloc = SnMalloc;
 
