@@ -197,8 +197,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Run subscriber
     let subscriber = {
-        let (clip_clone, match_key, cache_key) = (
+        let (clip_clone, pool_clone, match_key, cache_key) = (
             clip.clone(),
+            pool.clone(),
             format!("key:{}:*", code),
             format!("key:{}:{}", code, name),
         );
@@ -210,7 +211,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let keys = cmd("KEYS")
                     .arg(&match_key)
                     .query_async::<_, Vec<String>>(
-                        &mut pool.get().await.expect("Failed to get connection!"),
+                        &mut pool_clone.get().await.expect("Failed to get connection!"),
                     )
                     .await
                     .expect("redis execution failed!");
@@ -227,7 +228,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
 
                     let (clip_clone, pool_clone, alice_clone) =
-                        (clip_clone.clone(), pool.clone(), alice.clone());
+                        (clip_clone.clone(), pool_clone.clone(), alice.clone());
                     device_futures.insert(
                         key.clone(),
                         tokio::spawn(async move {
@@ -259,6 +260,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Wait for resource release
     publisher.await?;
     subscriber.await?;
+
+    // Clear redis cache
+    let cache_keys = cmd("KEYS")
+        .arg(format!("key:{}:{}:*", code, name))
+        .query_async::<_, Vec<String>>(&mut pool.get().await?)
+        .await?;
+    for cache_key in cache_keys {
+        cmd("DEL")
+            .arg(cache_key)
+            .query_async(&mut pool.get().await?)
+            .await?;
+    }
 
     Ok(())
 }
