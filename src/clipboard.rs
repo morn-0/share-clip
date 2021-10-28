@@ -25,7 +25,7 @@ pub enum ClipboardContentKinds {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ClipContent {
+pub struct ClipboardContent {
     pub kinds: ClipboardContentKinds,
     pub prop: SmallVec<[String; 8]>,
     pub bytes: MiniVec<u8>,
@@ -38,25 +38,25 @@ struct ClipboardCore {
 
 pub struct Clipboard {
     core: Mutex<ClipboardCore>,
-    tx: Sender<ClipContent>,
+    tx: Sender<ClipboardContent>,
 }
 
 impl Clipboard {
-    pub async fn new() -> (Arc<Self>, Receiver<ClipContent>) {
+    pub async fn new() -> (Arc<Self>, Receiver<ClipboardContent>) {
         Self::with_buffer(16).await
     }
 
-    pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipContent>) {
+    pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipboardContent>) {
         let core = Mutex::new(ClipboardCore {
             hash: blake3::hash(b""),
             clip: _Clipboard::new().expect("Failed to create clipboard!"),
         });
-        let (tx, rx) = mpsc::channel::<ClipContent>(1024);
+        let (tx, rx) = mpsc::channel::<ClipboardContent>(1024);
 
         (Arc::new(Clipboard { core, tx }), rx)
     }
 
-    pub async fn set_content(&self, content: ClipContent) -> Result<(), Box<dyn Error>> {
+    pub async fn set_content(&self, content: ClipboardContent) -> Result<(), Box<dyn Error>> {
         let mut core = self.core.lock().await;
 
         let (prop, bytes) = (content.prop, content.bytes);
@@ -86,7 +86,7 @@ impl Clipboard {
         }
     }
 
-    pub async fn get_content(&self) -> Result<ClipContent, Box<dyn Error>> {
+    pub async fn get_content(&self) -> Result<ClipboardContent, Box<dyn Error>> {
         let mut core = self.core.lock().await;
 
         let (text, image) = (core.clip.get_text(), core.clip.get_image());
@@ -110,7 +110,7 @@ impl Clipboard {
             (smallvec![], mini_vec![], ClipboardContentKinds::NONE)
         };
 
-        Ok(ClipContent {
+        Ok(ClipboardContent {
             kinds: kinds,
             prop: prop,
             bytes: bytes,

@@ -1,4 +1,4 @@
-use crate::clipboard::ClipContent;
+use crate::clipboard::ClipboardContent;
 use crypto_box::{
     aead::{
         generic_array::{
@@ -68,7 +68,7 @@ impl Alice {
         }
     }
 
-    pub async fn encrypt(&self, mut content: ClipContent) -> ClipContent {
+    pub async fn encrypt(&self, mut content: ClipboardContent) -> ClipboardContent {
         let vec = self
             .encrypt
             .encrypt(&self.nonce, &content.bytes[..])
@@ -82,8 +82,8 @@ impl Alice {
         &self,
         mut conn: Connection,
         key: &String,
-        mut content: ClipContent,
-    ) -> Result<ClipContent, Box<dyn Error>> {
+        mut content: ClipboardContent,
+    ) -> Result<ClipboardContent, Box<dyn Error>> {
         let data = cmd("GET")
             .arg({
                 let mut key = key.clone();

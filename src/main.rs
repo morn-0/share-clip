@@ -2,7 +2,7 @@ mod clipboard;
 mod encrypt;
 
 use crate::{
-    clipboard::{ClipContent, Clipboard, ClipboardContentKinds, MyHandler},
+    clipboard::{Clipboard, ClipboardContent, ClipboardContentKinds, MyHandler},
     encrypt::Alice,
 };
 use clap::{App, Arg};
@@ -310,7 +310,7 @@ async fn on_device(
         if let Ok(Some(msg)) = timeout(wait, message.next()).await {
             let binary = msg.get_payload::<Vec<u8>>()?;
 
-            let content = bincode::deserialize::<ClipContent>(&binary)?;
+            let content = bincode::deserialize::<ClipboardContent>(&binary)?;
             let content = alice.decrypt(pool.get().await?, &key, content).await?;
 
             let summary = format!("Clipboard sharing from {}", name);
