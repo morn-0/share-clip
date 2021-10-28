@@ -1,8 +1,8 @@
-mod clip;
+mod clipboard;
 mod encrypt;
 
 use crate::{
-    clip::{Clip, ClipContext, ClipHandle},
+    clipboard::{ClipContent, Clipboard, ClipboardContentKinds, MyHandler},
     encrypt::Alice,
 };
 use clap::{App, Arg};
@@ -135,7 +135,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Initialization redis
     let pool = Arc::new(Config::from_url(url).create_pool()?);
     // Initialization clipboard
-    let (clip, mut rx) = Clip::new().await;
+    let (clipboard, mut rx) = Clipboard::new().await;
     // Initialization alice
     let secret_key = match matches.value_of("secret-key") {
         Some(v) => {
@@ -169,7 +169,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Run publisher
     let publisher = {
-        let (alice_clone, pool_clone, publish_key) = (
+        let (alice, pool, publish_key) = (
             alice.clone(),
             pool.clone(),
             format!("sub_{}_{}", code, name),
@@ -177,11 +177,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
         let publisher = async move {
             while RUNNING.load(Ordering::SeqCst) {
-                if let Ok(Some(clip_context)) = timeout(wait, rx.recv()).await {
-                    let clip_context = alice_clone.encrypt(clip_context).await;
-                    let binary = bincode::serialize(&clip_context).expect("Serialization failure!");
+                if let Ok(Some(content)) = timeout(wait, rx.recv()).await {
+                    let content = alice.encrypt(content).await;
+                    let binary = bincode::serialize(&content).expect("Serialization failure!");
 
-                    let mut conn = pool_clone.get().await.expect("Failed to get connection!");
+                    let mut conn = pool.get().await.expect("Failed to get connection!");
                     cmd("PUBLISH")
                         .arg(&publish_key)
                         .arg(binary)
@@ -197,8 +197,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Run subscriber
     let subscriber = {
-        let (clip_clone, pool_clone, match_key, cache_key) = (
-            clip.clone(),
+        let (clipboard, pool, match_key, cache_key) = (
+            clipboard.clone(),
             pool.clone(),
             format!("key:{}:*", code),
             format!("key:{}:{}", code, name),
@@ -211,7 +211,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let keys = cmd("KEYS")
                     .arg(&match_key)
                     .query_async::<_, Vec<String>>(
-                        &mut pool_clone.get().await.expect("Failed to get connection!"),
+                        &mut pool.get().await.expect("Failed to get connection!"),
                     )
                     .await
                     .expect("redis execution failed!");
@@ -227,13 +227,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         continue;
                     }
 
-                    let (clip_clone, pool_clone, alice_clone) =
-                        (clip_clone.clone(), pool_clone.clone(), alice.clone());
+                    let (clipboard, pool, alice) = (clipboard.clone(), pool.clone(), alice.clone());
                     device_futures.insert(
                         key.clone(),
                         tokio::spawn(async move {
-                            let _ =
-                                on_device(clip_clone, pool_clone, alice_clone, key, confirm).await;
+                            let _ = on_device(clipboard, pool, alice, key, confirm).await;
                         }),
                     );
                 }
@@ -251,7 +249,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Run Listener
     thread::spawn(|| {
-        let _ = Master::new(ClipHandle { clip }).run();
+        let _ = Master::new(MyHandler { clipboard }).run();
     });
 
     tokio::signal::ctrl_c().await?;
@@ -277,7 +275,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 async fn on_device(
-    clip: Arc<Clip>,
+    clipboard: Arc<Clipboard>,
     pool: Arc<Pool>,
     alice: Arc<Alice>,
     key: String,
@@ -299,14 +297,14 @@ async fn on_device(
         if let Ok(Some(msg)) = timeout(wait, message.next()).await {
             let binary = msg.get_payload::<Vec<u8>>()?;
 
-            let clip_content = bincode::deserialize::<ClipContext>(&binary)?;
-            let clip_content = alice.decrypt(pool.get().await?, &key, clip_content).await?;
+            let content = bincode::deserialize::<ClipContent>(&binary)?;
+            let content = alice.decrypt(pool.get().await?, &key, content).await?;
 
             let summary = format!("Clipboard sharing from {}", name);
-            let body = match clip_content.kinds {
-                clip::ClipContextKinds::TEXT => "[TEXT]",
-                clip::ClipContextKinds::IMAGE => "[IMAGE]",
-                clip::ClipContextKinds::NONE => "[NONE]",
+            let body = match content.kinds {
+                ClipboardContentKinds::TEXT => "[TEXT]",
+                ClipboardContentKinds::IMAGE => "[IMAGE]",
+                ClipboardContentKinds::NONE => "[NONE]",
             };
 
             let mut notify = Notification::new();
@@ -321,9 +319,9 @@ async fn on_device(
                     .show()?
                     .wait_for_action(|action| match action {
                         "accept" => {
-                            let clip_clone = clip.clone();
+                            let clipboard = clipboard.clone();
                             tokio::spawn(async move {
-                                if let Ok(_) = clip_clone.set_clip(clip_content).await {
+                                if let Ok(_) = clipboard.set_content(content).await {
                                     Notification::new()
                                         .summary("Accept successfully")
                                         .auto_icon()
@@ -336,7 +334,7 @@ async fn on_device(
                         _ => (),
                     });
             } else {
-                match clip.set_clip(clip_content).await {
+                match clipboard.set_content(content).await {
                     Ok(_) => {
                         notify.timeout(Timeout::Milliseconds(1000 * 5)).show()?;
                     }
@@ -345,7 +343,7 @@ async fn on_device(
             }
 
             #[cfg(any(target_os = "macos", target_os = "windows"))]
-            match clip.set_clip(clip_content).await {
+            match clipboard.set_content(content).await {
                 Ok(_) => {
                     notify.timeout(Timeout::Milliseconds(1000 * 5)).show()?;
                 }

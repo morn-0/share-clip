@@ -1,4 +1,4 @@
-use arboard::{Clipboard, ImageData};
+use arboard::{Clipboard as _Clipboard, ImageData};
 use blake3::Hash;
 use clipboard_master::{CallbackResult, ClipboardHandler};
 use minivec::{mini_vec, MiniVec};
@@ -11,55 +11,55 @@ use tokio::sync::{
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ClipContextKinds {
+pub enum ClipboardContentKinds {
     TEXT,
     IMAGE,
     NONE,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct ClipContext {
-    pub kinds: ClipContextKinds,
+pub struct ClipContent {
+    pub kinds: ClipboardContentKinds,
     pub prop: SmallVec<[String; 8]>,
     pub bytes: MiniVec<u8>,
 }
 
-struct ClipCore {
+struct ClipboardCore {
     hash: Hash,
-    clip: Clipboard,
+    clip: _Clipboard,
 }
 
-pub struct Clip {
-    core: Mutex<ClipCore>,
-    tx: Sender<ClipContext>,
+pub struct Clipboard {
+    core: Mutex<ClipboardCore>,
+    tx: Sender<ClipContent>,
 }
 
-impl Clip {
-    pub async fn new() -> (Arc<Self>, Receiver<ClipContext>) {
+impl Clipboard {
+    pub async fn new() -> (Arc<Self>, Receiver<ClipContent>) {
         Self::with_buffer(16).await
     }
 
-    pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipContext>) {
-        let core = Mutex::new(ClipCore {
+    pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipContent>) {
+        let core = Mutex::new(ClipboardCore {
             hash: blake3::hash(b""),
-            clip: Clipboard::new().expect("Failed to create clipboard!"),
+            clip: _Clipboard::new().expect("Failed to create clipboard!"),
         });
-        let (tx, rx) = mpsc::channel::<ClipContext>(1024);
+        let (tx, rx) = mpsc::channel::<ClipContent>(1024);
 
-        (Arc::new(Clip { core, tx }), rx)
+        (Arc::new(Clipboard { core, tx }), rx)
     }
 
-    pub async fn set_clip(&self, clip: ClipContext) -> Result<(), Box<dyn Error>> {
+    pub async fn set_content(&self, content: ClipContent) -> Result<(), Box<dyn Error>> {
         let mut core = self.core.lock().await;
 
-        let (prop, bytes) = (clip.prop, clip.bytes);
+        let (prop, bytes) = (content.prop, content.bytes);
         let hash = blake3::hash(&bytes);
 
-        let result = match clip.kinds {
-            ClipContextKinds::TEXT => core
+        let result = match content.kinds {
+            ClipboardContentKinds::TEXT => core
                 .clip
                 .set_text(String::from_utf8_lossy(bytes.as_slice()).to_string()),
-            ClipContextKinds::IMAGE => {
+            ClipboardContentKinds::IMAGE => {
                 let img = ImageData {
                     width: prop.get(1).unwrap().parse()?,
                     height: prop.get(0).unwrap().parse()?,
@@ -67,7 +67,7 @@ impl Clip {
                 };
                 core.clip.set_image(img)
             }
-            ClipContextKinds::NONE => Err(arboard::Error::ContentNotAvailable),
+            ClipboardContentKinds::NONE => Err(arboard::Error::ContentNotAvailable),
         };
 
         match result {
@@ -79,7 +79,7 @@ impl Clip {
         }
     }
 
-    pub async fn listen(&self) {
+    pub async fn get_content(&self) -> Result<ClipContent, Box<dyn Error>> {
         let mut core = self.core.lock().await;
 
         let (text, image) = (core.clip.get_text(), core.clip.get_image());
@@ -87,7 +87,7 @@ impl Clip {
             let text = text.unwrap();
             let bytes: MiniVec<u8> = MiniVec::from(text.as_bytes());
 
-            (smallvec![], bytes, ClipContextKinds::TEXT)
+            (smallvec![], bytes, ClipboardContentKinds::TEXT)
         } else if image.is_ok() {
             let image = image.unwrap();
             let prop = {
@@ -98,42 +98,50 @@ impl Clip {
             };
             let bytes: MiniVec<u8> = MiniVec::from(&*image.bytes);
 
-            (prop, bytes, ClipContextKinds::IMAGE)
+            (prop, bytes, ClipboardContentKinds::IMAGE)
         } else {
-            (smallvec![], mini_vec![], ClipContextKinds::NONE)
+            (smallvec![], mini_vec![], ClipboardContentKinds::NONE)
         };
 
-        if !ClipContextKinds::NONE.eq(&kinds) {
-            let hash = blake3::hash(&bytes);
+        Ok(ClipContent {
+            kinds: kinds,
+            prop: prop,
+            bytes: bytes,
+        })
+    }
+}
 
+pub struct MyHandler {
+    pub clipboard: Arc<Clipboard>,
+}
+
+impl MyHandler {
+    pub async fn handle(&self) -> Result<(), Box<dyn Error>> {
+        let content = self.clipboard.get_content().await?;
+
+        if !ClipboardContentKinds::NONE.eq(&content.kinds) {
+            let hash = blake3::hash(&content.bytes);
+
+            let mut core = self.clipboard.core.lock().await;
             if !core.hash.eq(&hash) {
-                if let Ok(_) = self
-                    .tx
-                    .send(ClipContext {
-                        kinds: kinds,
-                        prop: prop,
-                        bytes: bytes,
-                    })
-                    .await
-                {
+                if let Ok(_) = self.clipboard.tx.send(content).await {
                     core.hash.clone_from(&hash);
                 };
             }
         }
+
+        Ok(())
     }
 }
 
-pub struct ClipHandle {
-    pub clip: Arc<Clip>,
-}
-
-impl ClipboardHandler for ClipHandle {
+impl ClipboardHandler for MyHandler {
     #[tokio::main]
     async fn on_clipboard_change(&mut self) -> CallbackResult {
-        let clip = self.clip.clone();
-        tokio::spawn(async move {
-            clip.listen().await;
-        });
+        match self.handle().await {
+            Ok(_) => {}
+            _ => println!("Handle clipboard failure!"),
+        };
+
         CallbackResult::Next
     }
 }
