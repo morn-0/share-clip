@@ -261,7 +261,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     RUNNING.store(false, Ordering::SeqCst);
 
     // Trigger clipboard event
-    let content = clipboard.get_content().await?;
+    let mut content = clipboard.get_content().await?;
+    let content = match content.kinds {
+        ClipboardContentKinds::TEXT | ClipboardContentKinds::IMAGE => content,
+        ClipboardContentKinds::NONE => {
+            content.kinds = ClipboardContentKinds::TEXT;
+            content
+        }
+    };
     clipboard.set_content(content).await?;
 
     // Wait for resource release
