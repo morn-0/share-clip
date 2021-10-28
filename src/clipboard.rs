@@ -4,11 +4,18 @@ use clipboard_master::{CallbackResult, ClipboardHandler};
 use minivec::{mini_vec, MiniVec};
 use serde::{Deserialize, Serialize};
 use smallvec::{smallvec, SmallVec};
-use std::{borrow::Cow, error::Error, sync::Arc};
+use std::{
+    borrow::Cow,
+    error::Error,
+    io,
+    sync::{atomic::Ordering, Arc},
+};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     Mutex,
 };
+
+use crate::RUNNING;
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ClipboardContentKinds {
@@ -137,11 +144,23 @@ impl MyHandler {
 impl ClipboardHandler for MyHandler {
     #[tokio::main]
     async fn on_clipboard_change(&mut self) -> CallbackResult {
+        if !RUNNING.load(Ordering::SeqCst) {
+            return CallbackResult::Stop;
+        }
+
         match self.handle().await {
             Ok(_) => {}
             _ => println!("Handle clipboard failure!"),
         };
 
         CallbackResult::Next
+    }
+
+    fn on_clipboard_error(&mut self, error: io::Error) -> CallbackResult {
+        if !RUNNING.load(Ordering::SeqCst) {
+            CallbackResult::Stop
+        } else {
+            CallbackResult::StopWithError(error)
+        }
     }
 }

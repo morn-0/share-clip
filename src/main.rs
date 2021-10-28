@@ -248,14 +248,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
     };
 
     // Run Listener
-    thread::spawn(|| {
-        let _ = Master::new(MyHandler { clipboard }).run();
-    });
+    let listener = {
+        let clipboard = clipboard.clone();
+        thread::spawn(|| {
+            let _ = Master::new(MyHandler { clipboard }).run();
+        })
+    };
 
     tokio::signal::ctrl_c().await?;
+
+    // Modify running state
     RUNNING.store(false, Ordering::SeqCst);
 
+    // Trigger clipboard event
+    let content = clipboard.get_content().await?;
+    clipboard.set_content(content).await?;
+
     // Wait for resource release
+    match listener.join() {
+        Ok(_) => {}
+        _ => println!("Listener release failure!"),
+    };
     publisher.await?;
     subscriber.await?;
 
