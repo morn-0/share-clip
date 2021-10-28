@@ -253,7 +253,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let _ = Master::new(ClipHandle { clip }).run();
     });
 
-    tokio::signal::ctrl_c().await.unwrap();
+    tokio::signal::ctrl_c().await?;
     RUNNING.store(false, Ordering::SeqCst);
 
     // Wait for resource release
