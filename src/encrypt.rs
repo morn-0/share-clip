@@ -1,6 +1,4 @@
-use std::error::Error;
-
-use crate::clip::ClipContext;
+use crate::clipboard::ClipboardContent;
 use crypto_box::{
     aead::{
         generic_array::{
@@ -18,6 +16,7 @@ use crypto_box::{
 use deadpool_redis::Connection;
 use minivec::MiniVec;
 use redis::cmd;
+use std::error::Error;
 use tokio::{fs::File, io::AsyncWriteExt};
 
 pub struct Alice {
@@ -69,22 +68,22 @@ impl Alice {
         }
     }
 
-    pub async fn encrypt(&self, mut clip: ClipContext) -> ClipContext {
+    pub async fn encrypt(&self, mut content: ClipboardContent) -> ClipboardContent {
         let vec = self
             .encrypt
-            .encrypt(&self.nonce, &clip.bytes[..])
+            .encrypt(&self.nonce, &content.bytes[..])
             .expect("Encryption failure!");
-        clip.bytes = MiniVec::from(vec.as_slice());
+        content.bytes = MiniVec::from(vec.as_slice());
 
-        clip
+        content
     }
 
     pub async fn decrypt(
         &self,
         mut conn: Connection,
         key: &String,
-        mut clip: ClipContext,
-    ) -> Result<ClipContext, Box<dyn Error>> {
+        mut content: ClipboardContent,
+    ) -> Result<ClipboardContent, Box<dyn Error>> {
         let data = cmd("GET")
             .arg({
                 let mut key = key.clone();
@@ -111,11 +110,11 @@ impl Alice {
 
         let decrypt = SalsaBox::new(&priv_public_key, &self.comm_secret_key);
         let vec = decrypt
-            .decrypt(nonce, &clip.bytes[..])
+            .decrypt(nonce, &content.bytes[..])
             .expect("Decryption failure!");
-        clip.bytes = MiniVec::from(vec.as_slice());
+        content.bytes = MiniVec::from(vec.as_slice());
 
-        Ok(clip)
+        Ok(content)
     }
 }
 
