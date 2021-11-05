@@ -50,7 +50,7 @@ impl Clipboard {
             hash: blake3::hash(b""),
             clip: _Clipboard::new().expect("Failed to create clipboard!"),
         });
-        let (tx, rx) = mpsc::channel::<ClipboardContent>(1024);
+        let (tx, rx) = mpsc::channel::<ClipboardContent>(buffer);
 
         (Arc::new(Clipboard { core, tx }), rx)
     }
@@ -109,11 +109,7 @@ impl Clipboard {
             (smallvec![], mini_vec![], ClipboardContentKinds::NONE)
         };
 
-        Ok(ClipboardContent {
-            kinds: kinds,
-            prop: prop,
-            bytes: bytes,
-        })
+        Ok(ClipboardContent { kinds, prop, bytes })
     }
 }
 
