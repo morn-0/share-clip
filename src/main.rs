@@ -55,7 +55,7 @@ static GLOBAL_TIMEOUT: f64 = 2.5;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let matches = App::new("share-clip")
-        .version("0.3.3")
+        .version("0.3.5")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
