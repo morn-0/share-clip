@@ -9,7 +9,7 @@ share-clip
 ------
 * 基于 Redis (可轻松支持广域网/局域网的共享, 自动发现同身份下的机器), 便携/高性能
 * 全数据加密 (加密算法采用 XSalsa20Poly1305), 支持自定义密钥
-* 支持 Linux (X11/Wayland) macOS, Windows 平台, (Android 开发中, iOS 暂无开发计划)
+* 支持 Linux (X11/Wayland), macOS, Windows 平台, (Android 开发中, iOS 暂无开发计划)
 * 支持文本和图片
 * 支持共享提示 (macOS 不支持), 询问框确认共享 (仅支持 Linux)
 
