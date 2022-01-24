@@ -59,52 +59,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
-            Arg::with_name("url")
-                .short("u")
+            Arg::new("url")
+                .short('u')
                 .long("url")
                 .value_name("url")
                 .takes_value(true)
-                .required_unless("gen-key"),
+                .required_unless_present("gen-key"),
         )
         .arg(
-            Arg::with_name("code")
-                .short("c")
+            Arg::new("code")
+                .short('c')
                 .long("code")
                 .value_name("value")
                 .takes_value(true)
-                .required_unless("gen-key"),
+                .required_unless_present("gen-key"),
         )
         .arg(
-            Arg::with_name("name")
-                .short("n")
+            Arg::new("name")
+                .short('n')
                 .long("name")
                 .value_name("value")
                 .takes_value(true)
-                .required_unless("gen-key"),
+                .required_unless_present("gen-key"),
         )
         .arg(
-            Arg::with_name("confirm")
-                .short("C")
+            Arg::new("confirm")
+                .short('C')
                 .long("confirm")
                 .value_name("bool")
                 .takes_value(true),
         )
         .arg(
-            Arg::with_name("secret-key")
+            Arg::new("secret-key")
                 .long("secret-key")
                 .value_name("file")
                 .takes_value(true)
                 .requires("public-key"),
         )
         .arg(
-            Arg::with_name("public-key")
+            Arg::new("public-key")
                 .long("public-key")
                 .value_name("file")
                 .takes_value(true)
                 .requires("secret-key"),
         )
         .arg(
-            Arg::with_name("gen-key")
+            Arg::new("gen-key")
                 .long("gen-key")
                 .help("Generate key pairs"),
         )
@@ -133,7 +133,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap_or(false);
 
     // Initialization redis
-    let pool = Arc::new(Config::from_url(url).create_pool()?);
+    let pool = Arc::new(Config::from_url(url).create_pool(None)?);
     // Initialization clipboard
     let (clipboard, mut rx) = Clipboard::new().await;
     // Initialization alice

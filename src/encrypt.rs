@@ -126,7 +126,7 @@ pub async fn gen_key() -> Result<(), Box<dyn Error>> {
     };
 
     let mut secret_file = File::create("secret_key").await?;
-    secret_file.write_all(&secret_key.to_bytes()).await?;
+    secret_file.write_all(secret_key.as_bytes()).await?;
 
     let mut public_file = File::create("public_key").await?;
     public_file.write_all(public_key.as_bytes()).await?;
