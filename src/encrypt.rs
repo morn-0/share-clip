@@ -14,7 +14,6 @@ use crypto_box::{
     PublicKey, SalsaBox, SecretKey,
 };
 use deadpool_redis::Connection;
-use minivec::MiniVec;
 use redis::cmd;
 use std::error::Error;
 use tokio::{fs::File, io::AsyncWriteExt};
@@ -55,7 +54,7 @@ impl Alice {
                 key_pre.push_str(":nonce");
                 key_pre
             })
-            .arg(bincode::serialize(&nonce.as_slice()).expect("Serialization failure!"))
+            .arg(bincode::serialize(nonce.as_slice()).expect("Serialization failure!"))
             .query_async::<_, ()>(&mut conn)
             .await
             .expect("redis execution failed!");
@@ -73,7 +72,7 @@ impl Alice {
             .encrypt
             .encrypt(&self.nonce, &content.bytes[..])
             .expect("Encryption failure!");
-        content.bytes = MiniVec::from(vec.as_slice());
+        content.bytes = Vec::from(vec.as_slice());
 
         content
     }
@@ -112,7 +111,7 @@ impl Alice {
         let vec = decrypt
             .decrypt(nonce, &content.bytes[..])
             .expect("Decryption failure!");
-        content.bytes = MiniVec::from(vec.as_slice());
+        content.bytes = Vec::from(vec.as_slice());
 
         Ok(content)
     }

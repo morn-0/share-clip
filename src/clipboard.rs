@@ -1,19 +1,15 @@
 use crate::RUNNING;
 use arboard::{Clipboard as _Clipboard, ImageData};
 use blake3::Hash;
-use clipboard_master::{CallbackResult, ClipboardHandler};
-use minivec::{mini_vec, MiniVec};
+use clipboard_master::{CallbackResult, ClipboardHandler, Master};
+use flume::{Receiver, RecvError, Sender};
 use serde::{Deserialize, Serialize};
-use smallvec::{smallvec, SmallVec};
 use std::{
     borrow::Cow,
     error::Error,
     io,
-    sync::{atomic::Ordering, Arc},
-};
-use tokio::sync::{
-    mpsc::{self, Receiver, Sender},
-    Mutex,
+    sync::{atomic::Ordering, Arc, Mutex},
+    thread::{self, JoinHandle},
 };
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -26,8 +22,12 @@ pub enum ClipboardContentKinds {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClipboardContent {
     pub kinds: ClipboardContentKinds,
-    pub prop: SmallVec<[String; 8]>,
-    pub bytes: MiniVec<u8>,
+    pub prop: Vec<String>,
+    pub bytes: Vec<u8>,
+}
+
+pub struct Clipboard {
+    core: Mutex<ClipboardCore>,
 }
 
 struct ClipboardCore {
@@ -35,100 +35,141 @@ struct ClipboardCore {
     clip: _Clipboard,
 }
 
-pub struct Clipboard {
-    core: Mutex<ClipboardCore>,
-    tx: Sender<ClipboardContent>,
-}
-
 impl Clipboard {
-    pub async fn new() -> (Arc<Self>, Receiver<ClipboardContent>) {
-        Self::with_buffer(16).await
-    }
-
-    pub async fn with_buffer(buffer: usize) -> (Arc<Self>, Receiver<ClipboardContent>) {
+    pub fn new() -> Self {
         let core = Mutex::new(ClipboardCore {
             hash: blake3::hash(b""),
             clip: _Clipboard::new().expect("Failed to create clipboard!"),
         });
-        let (tx, rx) = mpsc::channel::<ClipboardContent>(buffer);
 
-        (Arc::new(Clipboard { core, tx }), rx)
+        Clipboard { core }
     }
 
-    pub async fn set_content(&self, content: ClipboardContent) -> Result<(), Box<dyn Error>> {
-        let mut core = self.core.lock().await;
+    pub fn set<'a>(&'a self, content: ClipboardContent) -> Result<(), Box<dyn Error + 'a>> {
+        let mut core = self.core.lock()?;
 
         let (prop, bytes) = (content.prop, content.bytes);
         let hash = blake3::hash(&bytes);
 
-        let result = match content.kinds {
+        if let Err(e) = match content.kinds {
             ClipboardContentKinds::TEXT => core
                 .clip
-                .set_text(String::from_utf8_lossy(bytes.as_slice()).to_string()),
-            ClipboardContentKinds::IMAGE => {
-                let img = ImageData {
-                    width: prop.get(1).unwrap().parse()?,
-                    height: prop.get(0).unwrap().parse()?,
-                    bytes: Cow::from(bytes.as_slice()),
+                .set_text(String::from_utf8_lossy(&bytes).to_string()),
+            ClipboardContentKinds::IMAGE => core.clip.set_image({
+                let width = match prop.get(1) {
+                    Some(width) => width,
+                    None => return Err(Box::new(arboard::Error::ContentNotAvailable)),
                 };
-                core.clip.set_image(img)
-            }
-            ClipboardContentKinds::NONE => Err(arboard::Error::ContentNotAvailable),
-        };
+                let height = match prop.get(0) {
+                    Some(height) => height,
+                    None => return Err(Box::new(arboard::Error::ContentNotAvailable)),
+                };
 
-        match result {
-            Ok(_) => {
-                core.hash.clone_from(&hash);
-                Ok(())
-            }
-            Err(err) => Err(Box::new(err)),
+                ImageData {
+                    width: width.parse()?,
+                    height: height.parse()?,
+                    bytes: Cow::from(&bytes),
+                }
+            }),
+            ClipboardContentKinds::NONE => Err(arboard::Error::ContentNotAvailable),
+        } {
+            return Err(Box::new(e));
         }
+
+        core.hash.clone_from(&hash);
+        Ok(())
     }
 
-    pub async fn get_content(&self) -> Result<ClipboardContent, Box<dyn Error>> {
-        let mut core = self.core.lock().await;
+    pub fn get<'a>(&'a self) -> Result<ClipboardContent, Box<dyn Error + 'a>> {
+        let mut core = self.core.lock()?;
 
         let (text, image) = (core.clip.get_text(), core.clip.get_image());
-        let (prop, bytes, kinds) = if text.is_ok() {
-            let text = text.unwrap();
-            let bytes: MiniVec<u8> = MiniVec::from(text.as_bytes());
+        let (prop, bytes, kinds) = if let Ok(text) = text {
+            let bytes: Vec<u8> = Vec::from(text.as_bytes());
 
-            (smallvec![], bytes, ClipboardContentKinds::TEXT)
-        } else if image.is_ok() {
-            let image = image.unwrap();
-            let prop = {
-                let mut prop = SmallVec::with_capacity(2);
-                prop.push(image.height.to_string());
-                prop.push(image.width.to_string());
-                prop
-            };
-            let bytes: MiniVec<u8> = MiniVec::from(&*image.bytes);
+            (vec![], bytes, ClipboardContentKinds::TEXT)
+        } else if let Ok(image) = image {
+            let prop = vec![image.height.to_string(), image.width.to_string()];
+            let bytes: Vec<u8> = Vec::from(&*image.bytes);
 
             (prop, bytes, ClipboardContentKinds::IMAGE)
         } else {
-            (smallvec![], mini_vec![], ClipboardContentKinds::NONE)
+            (vec![], vec![], ClipboardContentKinds::NONE)
         };
 
         Ok(ClipboardContent { kinds, prop, bytes })
     }
 }
 
-pub struct MyHandler {
-    pub clipboard: Arc<Clipboard>,
+pub struct Listener {
+    clipboard: Arc<Clipboard>,
+    handle: Option<JoinHandle<()>>,
+    receiver: Receiver<ClipboardContent>,
+}
+
+impl Listener {
+    pub fn new(clipboard: Arc<Clipboard>) -> Self {
+        let (sender, receiver) = flume::bounded(64);
+
+        let handle = {
+            let clipboard = clipboard.clone();
+
+            thread::spawn(move || {
+                if let Err(e) = Master::new(MyHandler { clipboard, sender }).run() {
+                    panic!("{:#}", e);
+                }
+            })
+        };
+
+        Listener {
+            clipboard,
+            handle: Some(handle),
+            receiver,
+        }
+    }
+
+    pub async fn recv(&self) -> Result<ClipboardContent, RecvError> {
+        self.receiver.recv_async().await
+    }
+}
+
+impl Drop for Listener {
+    fn drop(&mut self) {
+        if let Ok(mut content) = self.clipboard.get() {
+            let _ = self.clipboard.set(match content.kinds {
+                ClipboardContentKinds::TEXT | ClipboardContentKinds::IMAGE => content,
+                ClipboardContentKinds::NONE => {
+                    content.kinds = ClipboardContentKinds::TEXT;
+                    content
+                }
+            });
+        }
+
+        if let Some(handle) = self.handle.take() {
+            if let Err(e) = handle.join() {
+                panic!("{:#?}", e);
+            }
+        }
+    }
+}
+
+struct MyHandler {
+    clipboard: Arc<Clipboard>,
+    sender: Sender<ClipboardContent>,
 }
 
 impl MyHandler {
-    pub async fn handle(&self) -> Result<(), Box<dyn Error>> {
-        let content = self.clipboard.get_content().await?;
+    pub async fn handle(&self) -> Result<(), Box<dyn Error + '_>> {
+        let content = self.clipboard.get()?;
 
         if !ClipboardContentKinds::NONE.eq(&content.kinds) {
             let hash = blake3::hash(&content.bytes);
 
-            let mut core = self.clipboard.core.lock().await;
+            let mut core = self.clipboard.core.lock()?;
             if !core.hash.eq(&hash) {
-                if let Ok(_) = self.clipboard.tx.send(content).await {
+                if let Ok(()) = self.sender.send_async(content).await {
                     core.hash.clone_from(&hash);
-                };
+                }
             }
         }
 
@@ -140,15 +181,15 @@ impl ClipboardHandler for MyHandler {
     #[tokio::main]
     async fn on_clipboard_change(&mut self) -> CallbackResult {
         if !RUNNING.load(Ordering::SeqCst) {
-            return CallbackResult::Stop;
+            CallbackResult::Stop
+        } else {
+            match self.handle().await {
+                Ok(_) => {}
+                _ => println!("Handle clipboard failure!"),
+            }
+
+            CallbackResult::Next
         }
-
-        match self.handle().await {
-            Ok(_) => {}
-            _ => println!("Handle clipboard failure!"),
-        };
-
-        CallbackResult::Next
     }
 
     fn on_clipboard_error(&mut self, error: io::Error) -> CallbackResult {
