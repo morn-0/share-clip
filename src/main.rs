@@ -196,11 +196,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     publisher.await?;
     subscriber.await?;
 
-    let cache_keys = cmd("KEYS")
+    for cache_key in cmd("KEYS")
         .arg(format!("key:{}:{}:*", code, name))
         .query_async::<_, Vec<String>>(&mut pool.get().await?)
-        .await?;
-    for cache_key in cache_keys {
+        .await?
+    {
         cmd("DEL")
             .arg(cache_key)
             .query_async(&mut pool.get().await?)
@@ -221,15 +221,14 @@ async fn publisher(
     while RUNNING.load(Ordering::SeqCst) {
         if let Ok(Ok(content)) = timeout(GLOBAL_TIMEOUT, listener.recv()).await {
             let content = alice.encrypt(content).await;
-            let binary = bincode::serialize(&content).expect("Serialization failure!");
+            let binary = bincode::serialize(&content)?;
 
-            let mut conn = pool.get().await.expect("Failed to get connection!");
+            let mut conn = pool.get().await?;
             cmd("PUBLISH")
                 .arg(&key)
                 .arg(binary)
                 .query_async::<_, ()>(&mut conn)
-                .await
-                .expect("redis execution failed!");
+                .await?;
         }
     }
 
@@ -249,11 +248,8 @@ async fn subscriber(
     while RUNNING.load(Ordering::SeqCst) {
         let keys = cmd("KEYS")
             .arg(&match_key)
-            .query_async::<_, Vec<String>>(
-                &mut pool.get().await.expect("Failed to get connection!"),
-            )
-            .await
-            .expect("redis execution failed!");
+            .query_async::<_, Vec<String>>(&mut pool.get().await?)
+            .await?;
 
         for key in keys {
             let rev_key = key.chars().rev().collect::<String>();
