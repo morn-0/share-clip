@@ -1,6 +1,6 @@
 share-clip
 ======
-[![Release](https://github.com/cc-morning/share-clip/actions/workflows/release.yml/badge.svg?event=push)](https://github.com/cc-morning/share-clip/actions/workflows/release.yml)
+[![Release](https://github.com/cc-morning/share-clip/actions/workflows/release.yml/badge.svg?branch=v0.3.6)](https://github.com/cc-morning/share-clip/actions/workflows/release.yml)
 
 ### 多设备剪切板共享
 
