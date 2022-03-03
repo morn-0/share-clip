@@ -11,9 +11,6 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: taiki-e/create-gh-release-action@v1
-        with:
-          # (optional)
-          changelog: CHANGELOG.md
         env:
           # (required)
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -27,6 +24,9 @@ jobs:
           - windows-latest
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Installing Dependencies
+        if: ${{ runner.os == 'Linux' }}
+        run: sudo apt-get install libx11-xcb-dev libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev
       - uses: actions/checkout@v2
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
