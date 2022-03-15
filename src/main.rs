@@ -328,17 +328,14 @@ async fn on_device(
                     .show()?
                     .wait_for_action(|action| {
                         if action == "accept" {
-                            let clipboard = clipboard.clone();
-                            tokio::spawn(async move {
-                                if clipboard.set(content).is_ok() {
-                                    Notification::new()
-                                        .summary("Accept successfully")
-                                        .auto_icon()
-                                        .timeout(Timeout::Milliseconds(1000))
-                                        .show()
-                                        .expect("Notification of failure to send!");
-                                };
-                            });
+                            if clipboard.set(content).is_ok() {
+                                Notification::new()
+                                    .summary("Accept successfully")
+                                    .auto_icon()
+                                    .timeout(Timeout::Milliseconds(1000))
+                                    .show()
+                                    .expect("Notification of failure to send!");
+                            };
                         }
                     });
             } else if clipboard.set(content).is_ok() {
@@ -346,12 +343,9 @@ async fn on_device(
             }
 
             #[cfg(any(target_os = "macos", target_os = "windows"))]
-            match clipboard.set(content) {
-                Ok(_) => {
-                    notify.timeout(Timeout::Milliseconds(1000 * 5)).show()?;
-                }
-                _ => {}
-            };
+            if clipboard.set(content).is_ok() {
+                notify.timeout(Timeout::Milliseconds(1000 * 5)).show()?;
+            }
         }
     }
 

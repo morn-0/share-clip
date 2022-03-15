@@ -183,9 +183,8 @@ impl ClipboardHandler for MyHandler {
         if !RUNNING.load(Ordering::SeqCst) {
             CallbackResult::Stop
         } else {
-            match self.handle().await {
-                Ok(_) => {}
-                _ => println!("Handle clipboard failure!"),
+            if let Err(e) = self.handle().await {
+                println!("Handle clipboard failure! {:?}", e)
             }
 
             CallbackResult::Next
