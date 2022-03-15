@@ -8,7 +8,7 @@ homepage = "https://github.com/cc-morning/share-clip"
 repository = "https://github.com/cc-morning/share-clip"
 
 [dependencies]
-arboard = { git = "https://github.com/1Password/arboard", features = [ "image-data", "wayland-data-control" ], default-features = false }
+arboard = { version = "2", features = [ "image-data", "wayland-data-control" ], default-features = false }
 bincode = { version = "1", default-features = false }
 blake3 = { version = "1", default-features = false }
 clap = { version = "3", features = [ "std", "derive" ], default-features = false }
