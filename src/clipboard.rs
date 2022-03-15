@@ -159,7 +159,7 @@ struct MyHandler {
 }
 
 impl MyHandler {
-    pub async fn handle(&self) -> Result<(), Box<dyn Error + '_>> {
+    pub fn handle(&self) -> Result<(), Box<dyn Error + '_>> {
         let content = self.clipboard.get()?;
 
         if !ClipboardContentKinds::NONE.eq(&content.kinds) {
@@ -167,7 +167,7 @@ impl MyHandler {
 
             let mut core = self.clipboard.core.lock()?;
             if !core.hash.eq(&hash) {
-                if let Ok(()) = self.sender.send_async(content).await {
+                if let Ok(()) = self.sender.send(content) {
                     core.hash.clone_from(&hash);
                 }
             }
@@ -178,12 +178,11 @@ impl MyHandler {
 }
 
 impl ClipboardHandler for MyHandler {
-    #[tokio::main]
-    async fn on_clipboard_change(&mut self) -> CallbackResult {
+    fn on_clipboard_change(&mut self) -> CallbackResult {
         if !RUNNING.load(Ordering::SeqCst) {
             CallbackResult::Stop
         } else {
-            if let Err(e) = self.handle().await {
+            if let Err(e) = self.handle() {
                 println!("Handle clipboard failure! {:?}", e)
             }
 
