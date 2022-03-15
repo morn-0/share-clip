@@ -53,7 +53,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     builder.parse_env(Env::new().filter("LOG")).init();
 
     let matches = App::new("share-clip")
-        .version("0.3.6")
+        .version("0.3.7")
         .author("morning")
         .about("Multi-device clipboard sharing.")
         .arg(
